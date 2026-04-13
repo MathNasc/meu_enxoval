@@ -1,45 +1,49 @@
 // src/lib/hooks/useAuth.js
-// Gerencia autenticação: login, registro, logout, sessão persistente
-
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabase";
 
 export function useAuth() {
   const [user,    setUser]    = useState(null);
-  const [profile, setProfile] = useState(null);  // inclui household_id
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState("");
 
-  // ── Carrega perfil (household_id, email) ────────────────
+  // ── Carrega perfil + household com invite_code ───────────
   const loadProfile = useCallback(async (userId) => {
-    const { data } = await supabase
+    const { data, error: err } = await supabase
       .from("profiles")
       .select("*, households(id, name, invite_code)")
       .eq("id", userId)
       .single();
+
+    if (err) console.error("[useAuth] loadProfile:", err.message);
     if (data) setProfile(data);
+    return data;
   }, []);
 
   // ── Inicializa sessão ────────────────────────────────────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) loadProfile(session.user.id);
-      setLoading(false);
+      if (session?.user) {
+        loadProfile(session.user.id).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null);
         if (session?.user) loadProfile(session.user.id);
-        else setProfile(null);
+        else { setProfile(null); }
       }
     );
 
     return () => subscription.unsubscribe();
   }, [loadProfile]);
 
-  // ── Criar conta ─────────────────────────────────────────
+  // ── Criar conta ──────────────────────────────────────────
   const signUp = useCallback(async (email, password) => {
     setError("");
     const { error: err } = await supabase.auth.signUp({ email, password });
@@ -61,68 +65,71 @@ export function useAuth() {
     setProfile(null);
   }, []);
 
-  // ── Gerar convite casal ──────────────────────────────────
-  // Retorna o invite_code do household do usuário atual
+  // ── Retorna o invite_code do household ──────────────────
   const getInviteCode = useCallback(() => {
+    // profile.households é o objeto relacionado (join do SELECT)
     return profile?.households?.invite_code ?? null;
   }, [profile]);
 
-  // ── Entrar no household de outro usuário via código ──────
+  // ── FIX #5: usa a função RPC que ignora RLS ─────────────
+  // Antes: tentava SELECT em households diretamente (bloqueado pelo RLS)
+  // Agora: chama join_household_by_code() que é SECURITY DEFINER
   const joinHousehold = useCallback(async (code) => {
     setError("");
-    // 1. Encontra o household pelo código
-    const { data: household, error: findErr } = await supabase
-      .from("households")
-      .select("id, name")
-      .eq("invite_code", code.trim().toUpperCase())
-      .single();
+    if (!code?.trim()) { setError("Digite o código."); return false; }
 
-    if (findErr || !household) {
-      setError("Código inválido. Verifique e tente novamente.");
+    const { data, error: rpcErr } = await supabase
+      .rpc("join_household_by_code", { p_code: code.trim().toUpperCase() });
+
+    if (rpcErr) {
+      console.error("[useAuth] joinHousehold rpc:", rpcErr.message);
+      setError("Erro ao processar o código. Tente novamente.");
       return false;
     }
 
-    if (household.id === profile?.household_id) {
-      setError("Você já está neste household.");
+    if (data?.error) {
+      setError(data.error);
       return false;
     }
 
-    // 2. Atualiza o perfil do usuário
-    const { error: updateErr } = await supabase
-      .from("profiles")
-      .update({ household_id: household.id })
-      .eq("id", user.id);
-
-    if (updateErr) { setError(updateErr.message); return false; }
-
-    // 3. Recarrega o perfil
+    // Recarrega perfil com novo household_id
     await loadProfile(user.id);
     return true;
-  }, [user, profile, loadProfile]);
+  }, [user, loadProfile]);
 
-  // ── Sair do household compartilhado (cria um novo) ───────
+  // ── Sair do casal: cria um household novo ────────────────
   const leaveHousehold = useCallback(async () => {
     setError("");
-    // Cria novo household para o usuário
-    const { data: newHousehold } = await supabase
+    if (!user) return false;
+
+    // 1. Novo household
+    const { data: newHousehold, error: hErr } = await supabase
       .from("households")
       .insert({ name: "Meu Enxoval" })
       .select()
       .single();
 
-    if (!newHousehold) return false;
+    if (hErr || !newHousehold) {
+      console.error("[useAuth] leaveHousehold:", hErr?.message);
+      setError("Não foi possível criar a nova lista.");
+      return false;
+    }
 
-    // Cria cômodos padrão
+    // 2. Cômodos padrão
     await supabase.from("rooms").insert([
-      { household_id: newHousehold.id, name:"Quarto",   icon:"bed",      color:"#D4875A" },
-      { household_id: newHousehold.id, name:"Sala",     icon:"sofa",     color:"#2A9D8F" },
-      { household_id: newHousehold.id, name:"Cozinha",  icon:"utensils", color:"#E9A830" },
-      { household_id: newHousehold.id, name:"Banheiro", icon:"bath",     color:"#1272AA" },
+      { household_id: newHousehold.id, name: "Quarto",   icon: "bed",      color: "#D4875A" },
+      { household_id: newHousehold.id, name: "Sala",     icon: "sofa",     color: "#2A9D8F" },
+      { household_id: newHousehold.id, name: "Cozinha",  icon: "utensils", color: "#E9A830" },
+      { household_id: newHousehold.id, name: "Banheiro", icon: "bath",     color: "#1272AA" },
     ]);
 
-    await supabase.from("household_settings").insert({ household_id: newHousehold.id });
+    await supabase
+      .from("household_settings")
+      .insert({ household_id: newHousehold.id });
 
-    await supabase.from("profiles")
+    // 3. Atualiza profile
+    await supabase
+      .from("profiles")
       .update({ household_id: newHousehold.id })
       .eq("id", user.id);
 
@@ -131,10 +138,17 @@ export function useAuth() {
   }, [user, loadProfile]);
 
   return {
-    user, profile, loading, error, setError,
-    signUp, signIn, signOut,
-    getInviteCode, joinHousehold, leaveHousehold,
+    user,
+    profile,
+    loading,
+    error,
+    setError,
+    signUp,
+    signIn,
+    signOut,
+    getInviteCode,
+    joinHousehold,
+    leaveHousehold,
     householdId: profile?.household_id ?? null,
-    isCouple: false, // será true quando dois usuários estiverem no mesmo household
   };
 }

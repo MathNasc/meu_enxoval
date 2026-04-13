@@ -1,3 +1,4 @@
 {
+  "/api/extract-product/route": "app/api/extract-product/route.js",
   "/page": "app/page.js"
 }

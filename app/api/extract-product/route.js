@@ -1,4 +1,13 @@
 // app/api/extract-product/route.js
+//
+// FIX #1: Nome retornava domínio em vez do produto
+// CAUSA:  Shopee/ML são SPAs — HTML chega sem conteúdo renderizado.
+//         O fallback retornava null; o frontend exibia o hostname da URL.
+// SOLUÇÃO:
+//   - Mercado Livre: usa API oficial gratuita (api.mercadolibre.com)
+//   - Shopee:        tenta a API móvel informal + JSON-LD
+//   - Outros:        Open Graph + JSON-LD + seletores CSS + title tag
+
 import axios from "axios";
 import * as cheerio from "cheerio";
 import https from "https";
@@ -11,7 +20,7 @@ const UA_LIST = [
 ];
 const rUA = () => UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
 
-const baseHeaders = (url) => ({
+const webHeaders = (url) => ({
   "User-Agent":                rUA(),
   "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language":           "pt-BR,pt;q=0.9,en;q=0.7",
@@ -25,26 +34,99 @@ const baseHeaders = (url) => ({
   "upgrade-insecure-requests": "1",
 });
 
-// ── Configurações de seletores por loja ──────────────────
-const STORES = {
+// ═══════════════════════════════════════════════════════
+// MERCADO LIVRE — API oficial gratuita
+// URL formato: https://www.mercadolivre.com.br/xxx-MLB{id}/p/{pid}
+//              ou https://produto.mercadolivre.com.br/MLB-{id}-...
+// ═══════════════════════════════════════════════════════
+async function extractMercadoLivre(url) {
+  // Extrai o ID do item (MLB-XXXXXXX ou MLBXXXXXXX)
+  const match = url.match(/MLB[-_]?(\d{7,12})/i);
+  if (!match) return null;
+
+  const itemId = `MLB${match[1]}`;
+  const apiUrl = `https://api.mercadolibre.com/items/${itemId}`;
+
+  try {
+    const { data } = await axios.get(apiUrl, {
+      timeout: 8_000,
+      headers: { "Accept": "application/json" },
+    });
+
+    if (!data?.title) return null;
+
+    return {
+      name:     data.title,
+      price:    data.price ? String(data.price) : null,
+      imageUrl: data.thumbnail?.replace("I.jpg", "O.jpg") || data.thumbnail || null,
+      brand:    data.attributes?.find(a => a.id === "BRAND")?.value_name || null,
+      suggestedRoom: guessRoom(data.title),
+    };
+  } catch (err) {
+    console.warn("[extract-product] ML API:", err.message);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// SHOPEE — API informal via URL de produto
+// URL formato: https://shopee.com.br/nome-i.{shopid}.{itemid}
+// ═══════════════════════════════════════════════════════
+async function extractShopee(url) {
+  // Extrai shopid e itemid da URL
+  const match = url.match(/i\.(\d+)\.(\d+)/);
+  if (!match) return null;
+
+  const shopId = match[1];
+  const itemId = match[2];
+
+  // API mobile da Shopee (sem autenticação necessária)
+  const apiUrl = `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`;
+
+  try {
+    const { data } = await axios.get(apiUrl, {
+      timeout: 8_000,
+      headers: {
+        "User-Agent":     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+        "Accept":         "application/json",
+        "Referer":        "https://shopee.com.br/",
+        "x-api-source":   "pc",
+      },
+      httpsAgent,
+    });
+
+    const item = data?.data?.item;
+    if (!item) return null;
+
+    const price = item.price ? item.price / 100000 : // Shopee usa centavos × 1000
+                  item.price_min ? item.price_min / 100000 : null;
+
+    const imageId = item.image || item.images?.[0];
+    const imageUrl = imageId
+      ? `https://cf.shopee.com.br/file/${imageId}`
+      : null;
+
+    return {
+      name:     item.name || null,
+      price:    price ? String(price.toFixed(2)) : null,
+      imageUrl,
+      brand:    item.brand || null,
+      suggestedRoom: guessRoom(item.name),
+    };
+  } catch (err) {
+    console.warn("[extract-product] Shopee API:", err.message);
+    return null;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// EXTRAÇÃO GENÉRICA — Open Graph + JSON-LD + CSS selectors
+// ═══════════════════════════════════════════════════════
+const STORE_SELECTORS = {
   "amazon.com.br": {
     name:  ["#productTitle", "#title"],
     price: [".priceToPay .a-offscreen", "#priceblock_ourprice", ".a-price-whole"],
     image: ["#imgTagWrapperId img", "#landingImage"],
-  },
-  "mercadolivre.com.br": {
-    name:  [".ui-pdp-title", "h1.ui-pdp-title"],
-    price: [".ui-pdp-price__second-line .andes-money-amount__fraction",
-            'meta[itemprop="price"]'],
-    image: [".ui-pdp-gallery__figure img"],
-  },
-  "shopee.com.br": {
-    // Shopee usa React/SPA; dados ficam em JSON da página ou meta tags
-    name:  ['meta[property="og:title"]', ".pdp-product-title", "h1"],
-    price: ['meta[property="product:price:amount"]', ".pdp-price", "._3n5NQx"],
-    image: ['meta[property="og:image"]', ".pdp-image img"],
-    // Shopee precisa de cookie especial, tentamos o JSON embutido
-    useJsonExtraction: true,
   },
   "magazineluiza.com.br": {
     name:  ['[data-testid="heading-product-title"]', "h1"],
@@ -54,7 +136,7 @@ const STORES = {
   "casasbahia.com.br": {
     name:  ["h1.product-title", "h1"],
     price: [".product-price__value", '[class*="price"]'],
-    image: ["#js-product-image", ".product-image img"],
+    image: ["#js-product-image"],
   },
   "americanas.com.br": {
     name:  ["h1.product-title", "h1"],
@@ -66,64 +148,18 @@ const STORES = {
     price: [".price-box__price", '[class*="price"]'],
     image: ["picture img"],
   },
-  "tokstok.com.br": {
-    name:  ["h1"],
-    price: ['[class*="price"]', '[class*="Price"]'],
-    image: ["picture img", "img.product-image"],
-  },
 };
 
-function getStore(url) {
+function getStoreConfig(url) {
   try {
     const h = new URL(url).hostname.toLowerCase();
-    for (const [d, cfg] of Object.entries(STORES)) {
-      if (h.includes(d)) return cfg;
+    for (const [domain, cfg] of Object.entries(STORE_SELECTORS)) {
+      if (h.includes(domain)) return cfg;
     }
   } catch {}
   return null;
 }
 
-// ── Shopee: extrai dados do JSON embutido no HTML ────────
-function extractShopeeJson(html) {
-  try {
-    // Shopee injeta dados em window.__INITIAL_STATE__ ou similar
-    const patterns = [
-      /"name"\s*:\s*"([^"]{5,200})"/,
-      /"item_name"\s*:\s*"([^"]{5,200})"/,
-    ];
-    for (const p of patterns) {
-      const m = html.match(p);
-      if (m) return { name: m[1], price: null, imageUrl: null };
-    }
-    // Tenta extrair preço do JSON
-    const priceMatch = html.match(/"price"\s*:\s*(\d+)/);
-    const price = priceMatch ? parseInt(priceMatch[1]) / 100000 : null; // Shopee usa centavos × 1000
-    return { name: null, price, imageUrl: null };
-  } catch { return null; }
-}
-
-// ── Extrai texto de seletores ────────────────────────────
-function getText($, sels) {
-  for (const s of (sels || [])) {
-    if (s.startsWith("meta")) {
-      const v = $(s).attr("content");
-      if (v?.trim()) return v.trim();
-    }
-    const t = $(s).first().text().replace(/\s+/g, " ").trim();
-    if (t && t.length > 2) return t;
-  }
-  return null;
-}
-
-function getAttr($, sels, attr) {
-  for (const s of (sels || [])) {
-    const v = $(s).first().attr(attr);
-    if (v?.trim() && !v.startsWith("data:")) return v.trim();
-  }
-  return null;
-}
-
-// ── Extrai Open Graph ────────────────────────────────────
 function getOG($) {
   const m = (...props) => {
     for (const p of props) {
@@ -140,7 +176,51 @@ function getOG($) {
   };
 }
 
-// ── Parse de preço ───────────────────────────────────────
+// Extrai dados do JSON-LD (schema.org Product)
+function getJsonLd($) {
+  let result = null;
+  $('script[type="application/ld+json"]').each((_, el) => {
+    if (result) return;
+    try {
+      const json = JSON.parse($(el).html() || "{}");
+      const items = Array.isArray(json) ? json : [json];
+      for (const item of items) {
+        if (item["@type"] === "Product") {
+          const offer = item.offers?.price || item.offers?.[0]?.price;
+          result = {
+            name:     item.name     || null,
+            price:    offer         ? String(offer) : null,
+            imageUrl: item.image    || (Array.isArray(item.image) ? item.image[0] : null),
+            brand:    item.brand?.name || null,
+          };
+          return;
+        }
+      }
+    } catch {}
+  });
+  return result;
+}
+
+function getText($, sels) {
+  for (const s of (sels || [])) {
+    if (s.startsWith("meta")) {
+      const v = $(s).attr("content");
+      if (v?.trim()) return v.trim();
+    }
+    const t = $(s).first().text().replace(/\s+/g, " ").trim();
+    if (t?.length > 2) return t;
+  }
+  return null;
+}
+
+function getAttr($, sels, attr) {
+  for (const s of (sels || [])) {
+    const v = $(s).first().attr(attr);
+    if (v?.trim() && !v.startsWith("data:")) return v.trim();
+  }
+  return null;
+}
+
 function parsePrice(str) {
   if (!str) return null;
   const c = String(str)
@@ -153,8 +233,10 @@ function parsePrice(str) {
 }
 
 function extractPrice($, storeSels) {
-  const all = [...(storeSels || []),
-    '[class*="price"]', '[class*="preco"]', '[class*="valor"]', ".price"];
+  const all = [
+    ...(storeSels || []),
+    '[class*="price"]', '[class*="preco"]', '[class*="valor"]', ".price",
+  ];
   for (const s of all) {
     if (s.startsWith("meta")) {
       const n = parsePrice($(s).attr("content"));
@@ -174,17 +256,80 @@ function extractPrice($, storeSels) {
   return null;
 }
 
+async function extractGeneric(url) {
+  let html;
+  try {
+    const { data } = await axios.get(url, {
+      headers: webHeaders(url),
+      timeout: 12_000,
+      maxRedirects: 5,
+      httpsAgent,
+      responseType: "text",
+      decompress: true,
+    });
+    html = data;
+  } catch (err) {
+    console.warn("[extract-product] fetch:", err.message);
+    return null;
+  }
+
+  const $ = cheerio.load(html);
+  const cfg = getStoreConfig(url);
+  const og  = getOG($);
+  const ld  = getJsonLd($);
+
+  // Nome: JSON-LD > store selectors > OG > h1 > title
+  const rawName =
+    ld?.name ||
+    (cfg?.name ? getText($, cfg.name) : null) ||
+    og.name ||
+    $("h1").first().text().trim() ||
+    $("title").text().replace(/\s*[-|–|·].*$/, "").trim() ||
+    null;
+
+  const price =
+    (ld?.price   ? parsePrice(ld.price)  : null) ||
+    extractPrice($, cfg?.price) ||
+    parsePrice(og.price) ||
+    null;
+
+  const imageUrl =
+    ld?.imageUrl ||
+    (cfg?.image ? getAttr($, cfg.image, "src") : null) ||
+    og.imageUrl ||
+    null;
+
+  const brand =
+    ld?.brand ||
+    $('meta[property="og:brand"]').attr("content") ||
+    $('[itemprop="brand"] [itemprop="name"]').first().text().trim() ||
+    null;
+
+  // Limpa sufixos de loja do título
+  const name = rawName
+    ?.replace(/\s*[-|–|·]\s*.*(Amazon|Mercado|Shopee|Magalu|Americanas|Casas Bahia|Leroy|Tok).*$/i, "")
+    .trim()
+    .slice(0, 200) || null;
+
+  return { name, price: price ? String(price) : null, imageUrl, brand };
+}
+
+// ═══════════════════════════════════════════════════════
+// DETECÇÃO DE CÔMODO
+// ═══════════════════════════════════════════════════════
 function guessRoom(name) {
   if (!name) return "outro";
   const n = name.toLowerCase();
-  if (/sofá|sofa|rack|tapete|poltrona|luminária|quadro|aparador|televisão/.test(n)) return "sala";
+  if (/sofá|sofa|rack|tapete|poltrona|luminária|quadro|aparador|tv\b|televisão|home theater/.test(n)) return "sala";
   if (/cama|colchão|cabeceira|guarda.roupa|cômoda|criado.mudo|travesseiro|edredom|lençol/.test(n)) return "quarto";
-  if (/panela|frigideira|geladeira|fogão|micro.ondas|liquidificador|batedeira|airfryer|prato|talher|copo/.test(n)) return "cozinha";
-  if (/toalha|saboneteira|box|vaso sanitário|cuba|torneira/.test(n)) return "banheiro";
+  if (/panela|frigideira|geladeira|fogão|micro.ondas|liquidificador|batedeira|airfryer|prato|talher|copo|tábua/.test(n)) return "cozinha";
+  if (/toalha|saboneteira|box|vaso sanitário|cuba|torneira|espelho.*banh/.test(n)) return "banheiro";
   return "outro";
 }
 
-// ── Handler principal ────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// HANDLER PRINCIPAL
+// ═══════════════════════════════════════════════════════
 export async function POST(req) {
   let url;
   try { ({ url } = await req.json()); }
@@ -193,78 +338,51 @@ export async function POST(req) {
   if (!url?.startsWith("http"))
     return Response.json({ error: "URL inválida" }, { status: 400 });
 
-  // ── Fetch HTML ───────────────────────────────────────────
-  let html = "";
-  try {
-    const { data } = await axios.get(url, {
-      headers:      baseHeaders(url),
-      timeout:      12_000,
-      maxRedirects: 5,
-      httpsAgent,
-      responseType: "text",
-      decompress:   true,
-    });
-    html = data;
-  } catch (err) {
-    console.error("[extract-product] fetch:", err.message);
-    // Fallback mínimo: retorna URL como link sem dados extraídos
+  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } })();
+
+  let result = null;
+
+  // ── Estratégias específicas por loja ──────────────────
+  if (host.includes("mercadolivre.com.br") || host.includes("mercadopago.com.br")) {
+    result = await extractMercadoLivre(url);
+  } else if (host.includes("shopee.com.br")) {
+    result = await extractShopee(url);
+  }
+
+  // ── Fallback genérico para todas as lojas ─────────────
+  if (!result?.name) {
+    const generic = await extractGeneric(url);
+    if (generic?.name) {
+      result = { ...result, ...generic };
+    }
+  }
+
+  // ── Fallback final: pelo menos retorna o hostname formatado ──
+  // Antes retornava null e o frontend mostrava o domínio.
+  // Agora retornamos null explícito e o frontend exibe erro claro.
+  if (!result?.name) {
+    console.warn("[extract-product] No data extracted from:", url);
     return Response.json({
-      name: null, price: null, imageUrl: null,
-      brand: null, suggestedRoom: "outro",
-      error: `Não foi possível acessar o site: ${err.message}`,
-    }, { status: 200 }); // 200 para o frontend mostrar mensagem de fallback
+      name:         null,
+      price:        null,
+      imageUrl:     null,
+      brand:        null,
+      suggestedRoom: "outro",
+      warning:      "Não consegui extrair os dados automaticamente. Preencha manualmente.",
+    });
   }
 
-  const $   = cheerio.load(html);
-  const cfg = getStore(url);
-  const og  = getOG($);
+  const name = result.name?.replace(
+    /\s*[-|–|·]\s*.*(Amazon|Mercado|Shopee|Magalu|Americanas|Casas Bahia).*$/i, ""
+  ).trim().slice(0, 200);
 
-  // ── Shopee: tenta JSON embutido primeiro ─────────────────
-  let shopeeData = null;
-  if (cfg?.useJsonExtraction) {
-    shopeeData = extractShopeeJson(html);
-  }
-
-  // ── Nome ─────────────────────────────────────────────────
-  const rawName =
-    shopeeData?.name ||
-    (cfg?.name ? getText($, cfg.name) : null) ||
-    og.name ||
-    $("h1").first().text().trim() ||
-    $("title").text().replace(/\s*[-|].*$/, "").trim() ||
-    null;
-
-  // ── Preço ────────────────────────────────────────────────
-  const price =
-    shopeeData?.price ||
-    extractPrice($, cfg?.price) ||
-    parsePrice(og.price) ||
-    null;
-
-  // ── Imagem ───────────────────────────────────────────────
-  const imageUrl =
-    shopeeData?.imageUrl ||
-    (cfg?.image ? getAttr($, cfg.image, "src") : null) ||
-    og.imageUrl ||
-    null;
-
-  // ── Marca ────────────────────────────────────────────────
-  const brand =
-    $('meta[property="og:brand"]').attr("content") ||
-    $('[itemprop="brand"] [itemprop="name"]').first().text().trim() ||
-    null;
-
-  const name = rawName
-    ?.replace(/\s*[-|–]\s*.*(Amazon|Mercado|Shopee|Magalu|Americanas|Casas Bahia).*$/i, "")
-    .trim().slice(0, 200) || null;
-
-  console.log("[extract-product]", { name, price: !!price, image: !!imageUrl });
+  console.log("[extract-product] OK:", { name, price: result.price, image: !!result.imageUrl });
 
   return Response.json({
     name,
-    price:         price != null ? String(price) : null,
-    imageUrl:      imageUrl || null,
-    brand:         brand   || null,
+    price:         result.price    ?? null,
+    imageUrl:      result.imageUrl ?? null,
+    brand:         result.brand    ?? null,
     suggestedRoom: guessRoom(name),
   });
 }

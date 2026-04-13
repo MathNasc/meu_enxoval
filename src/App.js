@@ -141,12 +141,27 @@ const Styles = () => (
 // ════════════════════════════════════════════════════════
 // CONSTANTS
 // ════════════════════════════════════════════════════════
-const ROOM_SUGGESTIONS = {
-  quarto:   ["Cama box","Colchão","Cabeceira","Guarda-roupa","Cômoda","Criado-mudo","Espelho","Cortina","Edredom","Travesseiro"],
-  sala:     ["Sofá","Mesa de centro","Rack TV","Televisão","Tapete","Luminária","Quadro","Poltrona","Prateleira","Cortina"],
-  cozinha:  ["Geladeira","Fogão","Micro-ondas","Panelas","Talheres","Pratos","Copos","Liquidificador","Lixeira","Escorredor"],
-  banheiro: ["Toalha de banho","Toalha de rosto","Tapete","Espelho","Porta-shampoo","Saboneteira","Suporte papel","Lixeira"],
+// FIX #2: chave normalizada pelo NOME do cômodo (não id UUID)
+// Salas do Supabase têm UUIDs; normalizamos para match por nome
+const ROOM_SUGGESTIONS_BY_NAME = {
+  "quarto":   ["Cama box","Colchão","Cabeceira","Guarda-roupa","Cômoda","Criado-mudo","Espelho","Cortina","Edredom","Travesseiro","Abajur"],
+  "sala":     ["Sofá","Mesa de centro","Rack TV","Televisão","Tapete","Luminária","Quadro","Poltrona","Prateleira","Cortina","Aparador"],
+  "cozinha":  ["Geladeira","Fogão","Micro-ondas","Panelas","Talheres","Pratos","Copos","Liquidificador","Lixeira","Escorredor","Tábua de corte"],
+  "banheiro": ["Toalha de banho","Toalha de rosto","Tapete","Espelho","Porta-shampoo","Saboneteira","Suporte papel","Lixeira"],
 };
+// Helper: dado um room id, retorna suas sugestões pelo nome normalizado
+function getRoomSuggestions(roomId, rooms, existingItems) {
+  const room = rooms.find(r => r.id === roomId);
+  if (!room) return [];
+  const key = room.name.toLowerCase().trim()
+    .normalize("NFD").replace(/[̀-ͯ]/g, ""); // remove acentos
+  // tenta match exato ou parcial
+  const list = ROOM_SUGGESTIONS_BY_NAME[key] ||
+    Object.entries(ROOM_SUGGESTIONS_BY_NAME).find(([k]) => key.includes(k))?.[1] || [];
+  return list.filter(s =>
+    !existingItems.some(i => i?.name?.toLowerCase() === s.toLowerCase())
+  ).slice(0, 6);
+}
 
 const STORE_MAP = [
   {p:"amazon.com.br",       n:"Amazon",       bg:"#FF9900",fg:"#000"},
@@ -244,6 +259,45 @@ const PromoBadge = ({promoInfo}) => {
     </div>
   );
 };
+
+// FIX #4: BudgetInput com debounce — evita salvar a cada tecla
+function BudgetInput({ value, onSave }) {
+  const [local, setLocal] = useState(value ?? "");
+  const timerRef = useRef(null);
+
+  // Sincroniza quando valor externo muda (ex: outro dispositivo)
+  useEffect(() => { setLocal(value ?? ""); }, [value]);
+
+  const handleChange = (e) => {
+    const v = e.target.value;
+    setLocal(v);
+    clearTimeout(timerRef.current);
+    // Salva 800ms após parar de digitar
+    timerRef.current = setTimeout(() => {
+      onSave(parseFloat(v) || null);
+    }, 800);
+  };
+
+  useEffect(() => () => clearTimeout(timerRef.current), []);
+
+  return (
+    <input
+      type="number" min="0" step="100"
+      placeholder="Orçamento total R$"
+      value={local}
+      onChange={handleChange}
+      style={{
+        width: 180, padding: "6px 10px",
+        background: "var(--bg)", border: "1.5px solid var(--bdr)",
+        borderRadius: 8, fontFamily: "var(--f)", fontSize: 12.5,
+        color: "var(--tx)", outline: "none",
+        transition: "border-color .2s",
+      }}
+      onFocus={e => e.target.style.borderColor = "var(--p)"}
+      onBlur={e  => e.target.style.borderColor = "var(--bdr)"}
+    />
+  );
+}
 
 function DeleteButton({onConfirm,size=13}) {
   const [armed,setArmed]=useState(false);
@@ -391,7 +445,8 @@ function QuickAddModal({rooms=[],items=[],onSave,onClose}) {
       starred:false,priceHistory:priceStr?[{price:parseFloat(priceStr),date:todayStr(),source:"auto"}]:[],priceOffers:[]});
   };
 
-  const suggs=(ROOM_SUGGESTIONS[roomId]||[]).filter(s=>!(items||[]).some(i=>i?.name?.toLowerCase()===s.toLowerCase())).slice(0,5);
+  // FIX #2: usa nome do cômodo para buscar sugestões, não o UUID
+  const suggs=getRoomSuggestions(roomId, rooms, items||[]);
   const RoomPicker=()=>(
     <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
       {rooms.map(r=>{const Icon=getIcon(r.icon);const on=roomId===r.id;return(
@@ -450,14 +505,21 @@ function QuickAddModal({rooms=[],items=[],onSave,onClose}) {
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             {loading&&<><Sk h={54} w="100%"/><Sk h={14} w="80%"/><Sk h={11} w="40%"/></>}
             {!loading&&extracted&&!error&&(
-              <div style={{background:"var(--ga)",border:"1px solid rgba(42,157,143,.3)",borderRadius:10,padding:"12px 14px",display:"flex",gap:12}}>
-                {extracted.imageUrl&&<img src={extracted.imageUrl} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>}
-                <div style={{flex:1,minWidth:0}}>
-                  <p style={{fontSize:10.5,fontWeight:700,color:"var(--g)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>✓ Extraído automaticamente</p>
-                  <p style={{fontSize:13.5,fontWeight:600,lineHeight:1.3}}>{extracted.name}</p>
-                  {extracted.price&&<p style={{fontSize:13,fontWeight:800,color:"var(--g)",marginTop:3}}>{fmt(extracted.price)}</p>}
+              extracted.name ? (
+                <div style={{background:"var(--ga)",border:"1px solid rgba(42,157,143,.3)",borderRadius:10,padding:"12px 14px",display:"flex",gap:12}}>
+                  {extracted.imageUrl&&<img src={extracted.imageUrl} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>}
+                  <div style={{flex:1,minWidth:0}}>
+                    <p style={{fontSize:10.5,fontWeight:700,color:"var(--g)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>✓ Extraído automaticamente</p>
+                    <p style={{fontSize:13.5,fontWeight:600,lineHeight:1.3}}>{extracted.name}</p>
+                    {extracted.price&&<p style={{fontSize:13,fontWeight:800,color:"var(--g)",marginTop:3}}>{fmt(extracted.price)}</p>}
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div style={{background:"var(--goa)",border:"1px solid rgba(233,168,48,.3)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"var(--go)",display:"flex",gap:7}}>
+                  <AlertCircle size={14} style={{flexShrink:0,marginTop:1}}/>
+                  {extracted.warning || "Não consegui extrair os dados. Preencha o nome manualmente."}
+                </div>
+              )
             )}
             {!loading&&error&&<div style={{background:"var(--pa)",border:"1px solid rgba(18,114,170,.25)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"var(--p)",display:"flex",gap:7}}><AlertCircle size={14} style={{flexShrink:0,marginTop:1}}/>{error}</div>}
             {!loading&&(
@@ -850,8 +912,24 @@ export default function App() {
             </div>
             <div>
               <label style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",opacity:.7,display:"block",marginBottom:6}}>Data de entrega</label>
-              <input type="date" value={settings.deliveryDate||""} onChange={e=>saveSettings({deliveryDate:e.target.value})}
-                style={{background:"rgba(255,255,255,.18)",border:"1px solid rgba(255,255,255,.35)",borderRadius:8,padding:"8px 13px",color:"white",fontFamily:"var(--f)",fontSize:13,cursor:"pointer",outline:"none",colorScheme:"dark"}}/>
+              <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                <input type="date"
+                  value={settings.deliveryDate||""}
+                  onChange={e=>settingsHook.setDeliveryDate(e.target.value)}
+                  min={new Date().toISOString().slice(0,10)}
+                  style={{background:"rgba(255,255,255,.18)",border:"1px solid rgba(255,255,255,.35)",
+                    borderRadius:8,padding:"9px 14px",color:"white",fontFamily:"var(--f)",
+                    fontSize:14,cursor:"pointer",outline:"none",colorScheme:"dark",
+                    appearance:"none",WebkitAppearance:"none"}}/>
+                {settings.deliveryDate&&(
+                  <button onClick={()=>settingsHook.setDeliveryDate("")}
+                    style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.25)",
+                      borderRadius:6,padding:"3px 8px",color:"rgba(255,255,255,.8)",
+                      fontFamily:"var(--f)",fontSize:11,cursor:"pointer",textAlign:"center"}}>
+                    ✕ Limpar data
+                  </button>
+                )}
+              </div>
             </div>
           </div>
           <div style={{marginTop:18}}>
@@ -877,10 +955,7 @@ export default function App() {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7}}><Wallet size={14} style={{color:"var(--p)"}}/>Financeiro</h3>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
-              <input type="number" placeholder="Orçamento total R$" min="0"
-                value={settings.budgetTotal||""}
-                onChange={e=>saveSettings({budgetTotal:parseFloat(e.target.value)||null})}
-                style={{width:160,padding:"6px 10px",background:"var(--bg)",border:"1.5px solid var(--bdr)",borderRadius:8,fontFamily:"var(--f)",fontSize:12.5,color:"var(--tx)",outline:"none"}}/>
+              <BudgetInput value={settings.budgetTotal} onSave={settingsHook.setBudgetTotal}/>
             </div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
@@ -920,7 +995,8 @@ export default function App() {
       if(fStatus!=="all") arr=arr.filter(i=>i.status===fStatus);
       return arr;
     },[activeItems,search,fRoom,fStatus]);
-    const suggs=fRoom!=="all"?(ROOM_SUGGESTIONS[fRoom]||[]).filter(s=>!activeItems.some(i=>i.name?.toLowerCase()===s.toLowerCase())).slice(0,5):[];
+    // FIX #2: sugestões pelo nome do cômodo
+    const suggs=fRoom!=="all"?getRoomSuggestions(fRoom,rooms,activeItems):[];
     return (
       <div style={{display:"flex",flexDirection:"column",gap:18}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
