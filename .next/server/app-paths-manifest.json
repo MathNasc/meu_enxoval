@@ -1,5 +1,3 @@
 {
-  "/api/compare-prices/route": "app/api/compare-prices/route.js",
-  "/api/extract-product/route": "app/api/extract-product/route.js",
   "/page": "app/page.js"
 }
