@@ -1,4 +1,4 @@
-// File: C:\Users\mathe\enxoval\app\page.js
+// File: C:\Users\Marce_ccd3mzt\Enxoval\app\page.js
 import * as entry from '../../../app/page.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

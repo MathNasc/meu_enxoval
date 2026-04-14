@@ -1,4 +1,4 @@
-// File: C:\Users\mathe\enxoval\app\layout.js
+// File: C:\Users\Marce_ccd3mzt\Enxoval\app\layout.js
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

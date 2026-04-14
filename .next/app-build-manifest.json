@@ -10,10 +10,10 @@
       "static/chunks/main-app.js",
       "static/chunks/app/page.js"
     ],
-    "/api/extract-product/route": [
+    "/api/complete-home/route": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/api/extract-product/route.js"
+      "static/chunks/app/api/complete-home/route.js"
     ]
   }
 }
