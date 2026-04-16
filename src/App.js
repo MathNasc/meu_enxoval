@@ -12,7 +12,8 @@ import {
   Copy, ArrowRight, LayoutDashboard, Lightbulb, AlertTriangle,
   Bell, Award, RefreshCw, ChevronDown, ChevronUp, BadgePercent,
   RotateCcw, Trash, LogOut, User, SlidersHorizontal, SortAsc,
-  ShoppingCart, Boxes, PiggyBank, ArrowLeft
+  ShoppingCart, Boxes, PiggyBank, ArrowLeft, FileText, TrendingDown,
+  Filter, ArrowUpDown, Eye, BarChart3, PieChart, CalendarCheck
 } from "lucide-react";
 
 // ── Hooks Supabase ───────────────────────────────────────
@@ -1047,6 +1048,188 @@ export default function App() {
     const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,\uFEFF"+encodeURIComponent(csv);a.download="enxoval.csv";a.click();
   },[]);
 
+
+  // ── Summary View ─────────────────────────────────────
+  const SummaryView = () => {
+    const total     = activeItems.length;
+    const bought    = activeItems.filter(i=>i.status==="bought").length;
+    const want      = total - bought;
+    const highPrio  = activeItems.filter(i=>i.priority==="high"&&i.status!=="bought");
+    const starred   = activeItems.filter(i=>i.starred&&i.status!=="bought");
+    const promos    = activeItems.filter(i=>getPromoInfo(i)&&i.status!=="bought");
+    const allVal    = activeItems.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const spentVal  = activeItems.filter(i=>i.status==="bought"&&i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const budget    = parseFloat(settings.budgetTotal||0);
+    const pct       = total>0?Math.round((bought/total)*100):0;
+
+    // Top 5 most expensive pending
+    const topExpensive = [...activeItems]
+      .filter(i=>i.status!=="bought"&&i.price)
+      .sort((a,b)=>parseFloat(b.price)-parseFloat(a.price))
+      .slice(0,5);
+
+    // Rooms stats
+    const roomStats = rooms.map(r=>{
+      const ri=activeItems.filter(i=>i.roomId===r.id);
+      const rb=ri.filter(i=>i.status==="bought").length;
+      const rv=ri.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+      return {...r,total:ri.length,bought:rb,value:rv,pct:ri.length>0?Math.round((rb/ri.length)*100):0};
+    });
+
+    const days = daysLeft(settings.deliveryDate);
+
+    return (
+      <div style={{display:"flex",flexDirection:"column",gap:22}}>
+        <div>
+          <h1 className="fd" style={{fontSize:27,fontWeight:600}}>Resumo</h1>
+          <p style={{color:"var(--tx2)",fontSize:13,marginTop:3}}>Visão geral do seu enxoval</p>
+        </div>
+
+        {/* Progress overview */}
+        <div className="card" style={{padding:"20px 22px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7}}><BarChart3 size={15} style={{color:"var(--p)"}}/>Progresso geral</h3>
+            <span className="fd" style={{fontSize:22,color:"var(--p)",fontStyle:"italic"}}>{pct}%</span>
+          </div>
+          <div className="ptr" style={{height:10,marginBottom:12}}>
+            <div className="pfl" style={{width:`${pct}%`,background:"var(--g)",height:"100%"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+            {[
+              {l:"Total",   v:total, c:"var(--tx)"},
+              {l:"Comprados",v:bought,c:"var(--g)"},
+              {l:"Pendentes",v:want,  c:"var(--go)"},
+            ].map((s,i)=>(
+              <div key={i} style={{textAlign:"center",padding:"10px 6px",background:"var(--bg3)",borderRadius:9}}>
+                <p style={{fontSize:22,fontWeight:800,color:s.c,lineHeight:1}}>{s.v}</p>
+                <p style={{fontSize:10,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".06em",marginTop:3}}>{s.l}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Financial summary */}
+        <div className="card" style={{padding:"20px 22px"}}>
+          <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7,marginBottom:14}}><Wallet size={15} style={{color:"var(--p)"}}/>Financeiro</h3>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:budget>0?14:0}}>
+            {[
+              {l:"Estimado total",v:fmt(allVal),  c:"var(--p)"},
+              {l:"Já gasto",     v:fmt(spentVal), c:"var(--g)"},
+            ].map((s,i)=>(
+              <div key={i} style={{padding:"12px 14px",background:"var(--bg3)",borderRadius:10}}>
+                <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:5}}>{s.l}</p>
+                <p className="fd" style={{fontSize:17,fontWeight:400,fontStyle:"italic",color:s.c}}>{s.v}</p>
+              </div>
+            ))}
+          </div>
+          {budget>0&&(
+            <div style={{padding:"12px 14px",background:"var(--pa)",borderRadius:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <p style={{fontSize:10,fontWeight:700,color:"var(--p)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>Orçamento definido</p>
+                <p style={{fontSize:16,fontWeight:800,color:"var(--p)"}}>{fmt(budget)}</p>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <p style={{fontSize:10,fontWeight:700,color:allVal>budget?"var(--r)":"var(--g)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>{allVal>budget?"Acima":"Abaixo"} do orçamento</p>
+                <p style={{fontSize:14,fontWeight:800,color:allVal>budget?"var(--r)":"var(--g)"}}>{allVal>budget?"+":"-"}{fmt(Math.abs(allVal-budget))}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Delivery countdown */}
+        {days!==null&&(
+          <div className="card" style={{padding:"16px 20px",display:"flex",alignItems:"center",gap:14}}>
+            <div style={{width:44,height:44,borderRadius:12,background:"var(--pa)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <CalendarCheck size={22} style={{color:"var(--p)"}}/>
+            </div>
+            <div>
+              <p style={{fontSize:11,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:3}}>Data de entrega</p>
+              <p style={{fontSize:15,fontWeight:700,color:"var(--tx)"}}>
+                {days>0?`${days} dias restantes`:days===0?"Hoje! 🎉":"Mudança realizada! ✨"}
+              </p>
+              {settings.deliveryDate&&<p style={{fontSize:12,color:"var(--tx3)",marginTop:2}}>{new Date(settings.deliveryDate+"T00:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})}</p>}
+            </div>
+          </div>
+        )}
+
+        {/* Highlights */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:10}}>
+          {[
+            {l:"Alta prioridade", v:highPrio.length, c:"var(--r)",   bg:"var(--ra)", Icon:Flame,       empty:"Nenhum item urgente"},
+            {l:"Favoritos",       v:starred.length,  c:"var(--go)",  bg:"var(--goa)",Icon:Star,        empty:"Nenhum favorito"},
+            {l:"Em promoção",     v:promos.length,   c:"var(--go)",  bg:"var(--goa)",Icon:BadgePercent,empty:"Sem promoções no momento"},
+          ].map((s,i)=>(
+            <div key={i} style={{padding:"14px 16px",background:s.bg,borderRadius:12,border:`1px solid ${s.c}28`}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}>
+                <s.Icon size={14} style={{color:s.c}}/><p style={{fontSize:11,fontWeight:700,color:s.c,textTransform:"uppercase",letterSpacing:".06em"}}>{s.l}</p>
+              </div>
+              {s.v>0
+                ? <p style={{fontSize:26,fontWeight:800,color:s.c,lineHeight:1}}>{s.v}</p>
+                : <p style={{fontSize:12,color:s.c,opacity:.7,fontStyle:"italic"}}>{s.empty}</p>}
+            </div>
+          ))}
+        </div>
+
+        {/* Most expensive pending */}
+        {topExpensive.length>0&&(
+          <div className="card" style={{padding:"18px 20px"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:12,display:"flex",alignItems:"center",gap:7}}><TrendingDown size={14} style={{color:"var(--r)"}}/>Maiores gastos pendentes</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:7}}>
+              {topExpensive.map((item,i)=>{
+                const room=rooms.find(r=>r.id===item.roomId);
+                const Icon=room?getIcon(room.icon):Home;
+                return(
+                  <div key={item.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 12px",background:"var(--bg3)",borderRadius:9}}>
+                    <span style={{fontSize:11,fontWeight:700,color:"var(--tx3)",width:16,textAlign:"center"}}>{i+1}</span>
+                    {item.imageUrl&&<img src={item.imageUrl} alt="" style={{width:32,height:32,borderRadius:6,objectFit:"cover",flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>}
+                    <div style={{flex:1,minWidth:0}}>
+                      <p style={{fontWeight:600,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.name}</p>
+                      <p style={{fontSize:11,color:"var(--tx3)",display:"flex",alignItems:"center",gap:3,marginTop:1}}><Icon size={9}/>{room?.name||"—"}</p>
+                    </div>
+                    <span style={{fontWeight:800,fontSize:13.5,color:"var(--p)",flexShrink:0}}>{fmt(item.price)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Room breakdown */}
+        {roomStats.length>0&&(
+          <div className="card" style={{padding:"18px 20px"}}>
+            <h3 style={{fontWeight:700,fontSize:15,marginBottom:12,display:"flex",alignItems:"center",gap:7}}><Home size={14} style={{color:"var(--p)"}}/>Por cômodo</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              {roomStats.map(r=>{
+                const Icon=getIcon(r.icon);
+                return(
+                  <div key={r.id} style={{padding:"10px 14px",background:"var(--bg3)",borderRadius:9}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:r.total>0?7:0}}>
+                      <div style={{width:28,height:28,borderRadius:7,background:`${r.color}20`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon size={13} style={{color:r.color}}/></div>
+                      <span style={{fontWeight:700,fontSize:13,flex:1}}>{r.name}</span>
+                      <span style={{fontSize:11,color:"var(--tx3)"}}>{r.bought}/{r.total}</span>
+                      {r.value>0&&<span style={{fontSize:11.5,fontWeight:700,color:"var(--tx2)"}}>{fmt(r.value)}</span>}
+                      <span style={{fontSize:12,fontWeight:800,color:r.color,minWidth:32,textAlign:"right"}}>{r.pct}%</span>
+                    </div>
+                    {r.total>0&&<div className="ptr"><div className="pfl" style={{width:`${r.pct}%`,background:r.color}}/></div>}
+                    {r.total===0&&<p style={{fontSize:11.5,color:"var(--tx3)",fontStyle:"italic"}}>Sem itens</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Insights */}
+        {generateInsights().length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <h3 className="fd" style={{fontSize:18,fontWeight:600,display:"flex",alignItems:"center",gap:8}}><Lightbulb size={16} style={{color:"var(--go)"}}/>Insights</h3>
+            {generateInsights().map((ins,i)=><InsightCard key={i} type={ins.type} text={ins.text} Icon={ins.Icon} delay={i*.07}/>)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ── Loading / Auth screens ────────────────────────────────
   if(auth.loading) return (
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,background:"var(--bg)"}}>
@@ -1076,153 +1259,374 @@ export default function App() {
     {id:"dashboard",label:"Dashboard",  icon:LayoutDashboard,count:null},
     {id:"items",    label:"Meus Itens", icon:ShoppingBag,    count:activeItems.length},
     {id:"rooms",    label:"Cômodos",    icon:Home,           count:rooms.length},
+    {id:"summary",  label:"Resumo",     icon:FileText,       count:null},
     {id:"trash",    label:"Lixeira",    icon:Trash,          count:deletedItems.length,danger:true},
   ];
 
   // ── Conteúdo simplificado (Dashboard e Items)  ────────────
+  // ─────────────────────────────────────────────────────
+  // generateInsights — analisa items e gera alertas úteis
+  // ─────────────────────────────────────────────────────
+  const generateInsights = () => {
+    const insights = [];
+    if (!activeItems.length) return insights;
+
+    const highPrio  = activeItems.filter(i => i.priority === "high" && i.status !== "bought");
+    const promoList = activeItems.filter(i => getPromoInfo(i) && i.status !== "bought");
+    const bought    = activeItems.filter(i => i.status === "bought");
+    const pct       = activeItems.length > 0 ? Math.round((bought.length / activeItems.length) * 100) : 0;
+
+    if (highPrio.length > 0)
+      insights.push({ type:"alert", text:`${highPrio.length} item${highPrio.length>1?"s":""} de alta prioridade ainda pendente${highPrio.length>1?"s":""}`, Icon:Flame });
+    if (promoList.length > 0)
+      insights.push({ type:"warn", text:`🔥 ${promoList.length} item${promoList.length>1?"s em promoção":" em promoção"}! Aproveite antes de acabar`, Icon:BadgePercent });
+    if (pct >= 75 && pct < 100)
+      insights.push({ type:"ok", text:`Quase lá! ${pct}% do enxoval já comprado 🎉`, Icon:Award });
+    if (pct === 100 && activeItems.length > 0)
+      insights.push({ type:"ok", text:`Enxoval 100% completo! Parabéns! 🏠✨`, Icon:CheckCircle2 });
+
+    const emptyRooms = rooms.filter(r => !activeItems.some(i => i.roomId === r.id));
+    if (emptyRooms.length > 0)
+      insights.push({ type:"info", text:`${emptyRooms.length} cômodo${emptyRooms.length>1?"s":""} sem itens: ${emptyRooms.map(r=>r.name).join(", ")}`, Icon:Home });
+
+    const allVal   = activeItems.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const budget   = parseFloat(settings.budgetTotal||0);
+    if (budget > 0 && allVal > budget)
+      insights.push({ type:"alert", text:`Estimativa (${fmt(allVal)}) ultrapassa o orçamento (${fmt(budget)}) em ${fmt(allVal-budget)}`, Icon:TrendingDown });
+    else if (budget > 0 && allVal <= budget)
+      insights.push({ type:"ok", text:`Dentro do orçamento! Restam ${fmt(budget-allVal)} disponíveis`, Icon:Wallet });
+
+    return insights.slice(0, 5);
+  };
+
   const DashboardSimple=()=>{
-    const total=activeItems.length;
-    const bought=activeItems.filter(i=>i.status==="bought").length;
-    const pct=total>0?Math.round((bought/total)*100):0;
-    const days=daysLeft(settings.deliveryDate);
-    const allVal=activeItems.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
-    const spentVal=activeItems.filter(i=>i.status==="bought"&&i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const total    = activeItems.length;
+    const bought   = activeItems.filter(i=>i.status==="bought").length;
+    const want     = total - bought;
+    const pct      = total>0?Math.round((bought/total)*100):0;
+    const days     = daysLeft(settings.deliveryDate);
+    const allVal   = activeItems.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const spentVal = activeItems.filter(i=>i.status==="bought"&&i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const pendVal  = allVal - spentVal;
+    const budget   = parseFloat(settings.budgetTotal||0);
+    const budgetPct= budget>0?Math.min(100,Math.round((allVal/budget)*100)):0;
+    const insights = generateInsights();
+
     return (
       <div style={{display:"flex",flexDirection:"column",gap:22}}>
+        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-          <div><h1 className="fd" style={{fontSize:30,fontWeight:600}}>Meu Enxoval</h1><p style={{color:"var(--tx2)",fontSize:14,marginTop:3}}>Olá, {auth.user.email?.split("@")[0]} 👋</p></div>
+          <div>
+            <h1 className="fd" style={{fontSize:30,fontWeight:600}}>Meu Enxoval</h1>
+            <p style={{color:"var(--tx2)",fontSize:14,marginTop:3}}>Olá, {auth.user.email?.split("@")[0]} 👋</p>
+          </div>
           <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-          <button className="btn btn-s" style={{fontSize:12.5}} onClick={()=>setHomeModal(true)}><Sparkles size={13}/>Completar casa</button>
-          <button className="btn btn-s" style={{fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button>
-          <button className="btn btn-p pulse" onClick={()=>openAdd()}><Plus size={13}/>Adicionar</button>
+            <button className="btn btn-s" style={{fontSize:12.5}} onClick={()=>setHomeModal(true)}><Sparkles size={13}/>Completar casa</button>
+            <button className="btn btn-s" style={{fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button>
+            <button className="btn btn-p pulse" onClick={()=>openAdd()}><Plus size={13}/>Adicionar</button>
+          </div>
         </div>
-        </div>
-        {/* Countdown */}
+
+        {/* Countdown hero */}
         <div style={{background:"linear-gradient(135deg,#0C5884 0%,#1E90CC 100%)",borderRadius:18,padding:"22px 24px",color:"white"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:16}}>
             <div>
               <p style={{fontSize:10.5,fontWeight:700,textTransform:"uppercase",letterSpacing:".09em",opacity:.75,marginBottom:5,display:"flex",alignItems:"center",gap:5}}><Clock size={10}/>Contagem regressiva</p>
-              {days!==null?<div style={{display:"flex",alignItems:"baseline",gap:10}}><span className="fd" style={{fontSize:54,fontWeight:400,fontStyle:"italic",lineHeight:1}}>{Math.max(0,days)}</span><span style={{fontSize:17,opacity:.85}}>{days<0?"dias (chegou! ✨)":days===1?"dia restante":"dias restantes"}</span></div>:<p style={{fontSize:15,opacity:.7}}>Defina a data de entrega →</p>}
+              {days!==null
+                ? <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+                    <span className="fd" style={{fontSize:54,fontWeight:400,fontStyle:"italic",lineHeight:1}}>{Math.max(0,days)}</span>
+                    <span style={{fontSize:17,opacity:.85}}>{days<0?"dias (chegou! ✨)":days===1?"dia restante":"dias restantes"}</span>
+                  </div>
+                : <p style={{fontSize:15,opacity:.7}}>Defina a data de entrega →</p>}
             </div>
-            <div>
-              <label style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",opacity:.7,display:"block",marginBottom:6}}>Data de entrega</label>
-              <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                <input type="date"
-                  value={settings.deliveryDate||""}
-                  onChange={e=>settingsHook.setDeliveryDate(e.target.value)}
-                  min={new Date().toISOString().slice(0,10)}
-                  style={{background:"rgba(255,255,255,.18)",border:"1px solid rgba(255,255,255,.35)",
-                    borderRadius:8,padding:"9px 14px",color:"white",fontFamily:"var(--f)",
-                    fontSize:14,cursor:"pointer",outline:"none",colorScheme:"dark",
-                    appearance:"none",WebkitAppearance:"none"}}/>
-                {settings.deliveryDate&&(
-                  <button onClick={()=>settingsHook.setDeliveryDate("")}
-                    style={{background:"rgba(255,255,255,.15)",border:"1px solid rgba(255,255,255,.25)",
-                      borderRadius:6,padding:"3px 8px",color:"rgba(255,255,255,.8)",
-                      fontFamily:"var(--f)",fontSize:11,cursor:"pointer",textAlign:"center"}}>
-                    ✕ Limpar data
-                  </button>
-                )}
-              </div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              <label style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",opacity:.7}}>Data de entrega</label>
+              <input type="date" value={settings.deliveryDate||""}
+                onChange={e=>settingsHook.setDeliveryDate(e.target.value)}
+                min={new Date().toISOString().slice(0,10)}
+                style={{background:"rgba(255,255,255,.18)",border:"1px solid rgba(255,255,255,.35)",borderRadius:8,padding:"9px 14px",color:"white",fontFamily:"var(--f)",fontSize:14,cursor:"pointer",outline:"none",colorScheme:"dark"}}/>
+              {settings.deliveryDate&&(
+                <button onClick={()=>settingsHook.setDeliveryDate("")}
+                  style={{background:"rgba(255,255,255,.12)",border:"1px solid rgba(255,255,255,.2)",borderRadius:6,padding:"3px 8px",color:"rgba(255,255,255,.75)",fontFamily:"var(--f)",fontSize:11,cursor:"pointer"}}>
+                  ✕ Limpar data
+                </button>
+              )}
             </div>
           </div>
           <div style={{marginTop:18}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{opacity:.75,fontSize:12}}>Progresso</span><span style={{fontWeight:800,fontSize:14}}>{pct}%</span></div>
-            <div style={{height:6,background:"rgba(255,255,255,.2)",borderRadius:99,overflow:"hidden"}}><div style={{height:"100%",width:`${pct}%`,background:"rgba(255,255,255,.9)",borderRadius:99,transition:"width .8s ease"}}/></div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+              <span style={{opacity:.75,fontSize:12}}>Progresso geral</span>
+              <span style={{fontWeight:800,fontSize:14}}>{pct}%</span>
+            </div>
+            <div style={{height:6,background:"rgba(255,255,255,.2)",borderRadius:99,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${pct}%`,background:"rgba(255,255,255,.9)",borderRadius:99,transition:"width .8s ease"}}/>
+            </div>
           </div>
         </div>
-        {/* Stats */}
+
+        {/* Stats row */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
-          {[{l:"Total",v:total,Icon:Package,c:"var(--p)",d:0},{l:"Comprados",v:bought,Icon:CheckCircle2,c:"var(--g)",d:.06},{l:"Pendentes",v:total-bought,Icon:ShoppingBag,c:"var(--go)",d:.12},{l:"Estimado",v:fmt(allVal),Icon:DollarSign,c:"var(--p)",d:.18,sm:true}].map((s,i)=>(
+          {[
+            {l:"Total",    v:total,      Icon:Package,     c:"var(--p)",  d:0},
+            {l:"Comprados",v:bought,     Icon:CheckCircle2,c:"var(--g)",  d:.05},
+            {l:"Pendentes",v:want,       Icon:ShoppingBag, c:"var(--go)", d:.10},
+            {l:"Estimado", v:fmt(allVal),Icon:DollarSign,  c:"var(--p)",  d:.15,sm:true},
+          ].map((s,i)=>(
             <div key={i} className="stat" style={{animationDelay:`${s.d}s`}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                <div><p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:7}}>{s.l}</p>
-                  <p className="fd" style={{fontSize:s.sm?17:30,fontWeight:s.sm?700:400,fontStyle:s.sm?"normal":"italic",color:s.c,lineHeight:1}}>{s.v}</p>
+                <div>
+                  <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:7}}>{s.l}</p>
+                  <p className="fd" style={{fontSize:s.sm?18:30,fontWeight:s.sm?700:400,fontStyle:s.sm?"normal":"italic",color:s.c,lineHeight:1}}>{s.v}</p>
                 </div>
-                <div style={{width:32,height:32,borderRadius:8,background:`${s.c}18`,display:"flex",alignItems:"center",justifyContent:"center"}}><s.Icon size={15} style={{color:s.c}}/></div>
+                <div style={{width:32,height:32,borderRadius:8,background:`${s.c}18`,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <s.Icon size={15} style={{color:s.c}}/>
+                </div>
               </div>
             </div>
           ))}
         </div>
-        {/* Budget widget */}
-        <div className="card" style={{padding:"18px 20px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7}}><Wallet size={14} style={{color:"var(--p)"}}/>Financeiro</h3>
-            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+
+        {/* Financial control — RESTORED */}
+        <div className="card" style={{padding:"20px 22px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+            <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7}}><Wallet size={15} style={{color:"var(--p)"}}/>Controle financeiro</h3>
+            <div style={{display:"flex",alignItems:"center",gap:7}}>
+              <span style={{fontSize:12,color:"var(--tx3)"}}>Orçamento:</span>
               <BudgetInput value={settings.budgetTotal} onSave={settingsHook.setBudgetTotal}/>
             </div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-            {[{l:"Já gasto",v:fmt(spentVal),c:"var(--g)"},{l:"Pendente",v:fmt(allVal-spentVal),c:"var(--p)"}].map((s,i)=>(
-              <div key={i} style={{textAlign:"center"}}><p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:5}}>{s.l}</p><p className="fd" style={{fontSize:16,fontWeight:400,fontStyle:"italic",color:s.c}}>{s.v}</p></div>
+          {/* Financial cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:budget>0?14:0}}>
+            {[
+              {l:"Já gasto",   v:fmt(spentVal),c:"var(--g)",  bg:"var(--ga)", Icon:CheckCircle2},
+              {l:"Pendente",   v:fmt(pendVal), c:"var(--go)", bg:"var(--goa)",Icon:ShoppingBag},
+              {l:"Orçamento",  v:budget>0?fmt(budget):"—", c:"var(--p)",  bg:"var(--pa)", Icon:Target},
+            ].map((s,i)=>(
+              <div key={i} style={{background:s.bg,borderRadius:10,padding:"11px 13px",textAlign:"center"}}>
+                <div style={{display:"flex",justifyContent:"center",marginBottom:5}}><s.Icon size={13} style={{color:s.c}}/></div>
+                <p style={{fontSize:9.5,fontWeight:700,color:s.c,textTransform:"uppercase",letterSpacing:".06em",marginBottom:4,opacity:.8}}>{s.l}</p>
+                <p style={{fontSize:13.5,fontWeight:800,color:s.c}}>{s.v}</p>
+              </div>
             ))}
           </div>
-        </div>
-        {/* Room progress */}
-        {rooms.length>0&&<div><h3 className="fd" style={{fontSize:20,fontWeight:600,marginBottom:12}}>Por cômodo</h3>
-          <div style={{display:"flex",flexDirection:"column",gap:9}}>
-            {rooms.map(r=>{const Icon=getIcon(r.icon);const ri=activeItems.filter(i=>i.roomId===r.id);const b=ri.filter(i=>i.status==="bought").length;const t=ri.length;const p=t>0?Math.round((b/t)*100):0;return(
-              <div key={r.id} className="card" style={{padding:"14px 17px"}}>
-                <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:9}}>
-                  <div style={{width:36,height:36,borderRadius:10,background:`${r.color}20`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Icon size={17} style={{color:r.color}}/></div>
-                  <div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}><span style={{fontWeight:700,fontSize:14}}>{r.name}</span><span style={{fontSize:11.5,color:"var(--tx3)"}}>{b}/{t} · <b style={{color:r.color}}>{p}%</b></span></div></div>
-                </div>
-                <div className="ptr"><div className="pfl" style={{width:`${p}%`,background:r.color}}/></div>
+          {/* Budget progress bar */}
+          {budget>0&&(
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:"var(--tx3)",marginBottom:5}}>
+                <span>Uso do orçamento</span>
+                <span style={{fontWeight:700,color:budgetPct>=100?"var(--r)":"var(--tx)"}}>{budgetPct}%{budgetPct>=100?" ⚠️":""}</span>
               </div>
-            );})}
+              <div className="ptr">
+                <div className="pfl" style={{width:`${budgetPct}%`,background:budgetPct>=100?"var(--r)":budgetPct>=80?"var(--go)":"var(--g)"}}/>
+              </div>
+              {budgetPct>=100&&(
+                <p style={{fontSize:11.5,color:"var(--r)",fontWeight:600,marginTop:5}}>⚠️ Estimativa acima do orçamento em {fmt(allVal-budget)}</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Insights — RESTORED */}
+        {insights.length>0&&(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <h3 className="fd" style={{fontSize:18,fontWeight:600,display:"flex",alignItems:"center",gap:8}}>
+              <Lightbulb size={16} style={{color:"var(--go)"}}/>Insights
+            </h3>
+            {insights.map((ins,i)=>(
+              <InsightCard key={i} type={ins.type} text={ins.text} Icon={ins.Icon} delay={i*0.07}/>
+            ))}
           </div>
-        </div>}
-        {total===0&&<div className="empty"><div className="eico"><Package size={30} style={{color:"var(--tx3)"}}/></div><p className="fd" style={{fontSize:22,fontWeight:600}}>Nenhum item ainda</p><p style={{fontSize:13,color:"var(--tx2)",maxWidth:280,lineHeight:1.55}}>Adicione itens ou cole links de produtos!</p><div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"}}>
-            <button className="btn btn-s" onClick={()=>setHomeModal(true)}><Sparkles size={13}/>IA: Completar casa</button>
-            <button className="btn btn-p pulse" onClick={()=>openAdd()} style={{fontSize:14,padding:"12px 22px"}}><Plus size={15}/>Adicionar primeiro item</button>
-          </div></div>}
+        )}
+
+        {/* Room progress */}
+        {rooms.length>0&&(
+          <div>
+            <h3 className="fd" style={{fontSize:20,fontWeight:600,marginBottom:12}}>Por cômodo</h3>
+            <div style={{display:"flex",flexDirection:"column",gap:9}}>
+              {rooms.map(r=>{
+                const Icon=getIcon(r.icon);
+                const ri=activeItems.filter(i=>i.roomId===r.id);
+                const b=ri.filter(i=>i.status==="bought").length;
+                const t=ri.length;
+                const p=t>0?Math.round((b/t)*100):0;
+                const roomVal=ri.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+                return(
+                  <div key={r.id} className="card" style={{padding:"14px 17px",cursor:"pointer"}}
+                    onClick={()=>setView("items")}>
+                    <div style={{display:"flex",alignItems:"center",gap:11,marginBottom:p>0?9:0}}>
+                      <div style={{width:38,height:38,borderRadius:10,background:`${r.color}20`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                        <Icon size={18} style={{color:r.color}}/>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                          <span style={{fontWeight:700,fontSize:14}}>{r.name}</span>
+                          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                            {roomVal>0&&<span style={{fontSize:11,color:"var(--tx3)"}}>{fmt(roomVal)}</span>}
+                            <span style={{fontSize:11.5,color:"var(--tx3)"}}>{b}/{t} · <b style={{color:r.color}}>{p}%</b></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {t>0&&<div className="ptr"><div className="pfl" style={{width:`${p}%`,background:r.color}}/></div>}
+                    {t===0&&<p style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",marginTop:3}}>Nenhum item ainda — clique para adicionar</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {total===0&&(
+          <div className="empty">
+            <div className="eico"><Package size={30} style={{color:"var(--tx3)"}}/></div>
+            <p className="fd" style={{fontSize:22,fontWeight:600}}>Nenhum item ainda</p>
+            <p style={{fontSize:13,color:"var(--tx2)",maxWidth:280,lineHeight:1.55}}>Adicione itens ou deixe a IA montar uma lista completa!</p>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap",justifyContent:"center"}}>
+              <button className="btn btn-s" onClick={()=>setHomeModal(true)}><Sparkles size={13}/>IA: Completar casa</button>
+              <button className="btn btn-p pulse" onClick={()=>openAdd()} style={{fontSize:14,padding:"12px 22px"}}><Plus size={15}/>Adicionar primeiro item</button>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
   const ItemsSimple=()=>{
-    const [search,setSearch]=useState("");
-    const [fRoom,setFRoom]=useState("all");
-    const [fStatus,setFStatus]=useState("all");
-    const [vw,setVw]=useState("grid");
-    const filtered=useMemo(()=>{
-      let arr=[...activeItems];
-      if(search.trim()) arr=arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase()));
-      if(fRoom!=="all") arr=arr.filter(i=>i.roomId===fRoom);
-      if(fStatus!=="all") arr=arr.filter(i=>i.status===fStatus);
+    const [search,  setSearch]  = useState("");
+    const [fRoom,   setFRoom]   = useState("all");
+    const [fStatus, setFStatus] = useState("all");
+    const [fPrio,   setFPrio]   = useState("all");
+    const [fStar,   setFStar]   = useState(false);
+    const [fPromo,  setFPromo]  = useState(false);
+    const [sort,    setSort]    = useState("recent");
+    const [vw,      setVw]      = useState("grid");
+
+    const filtered = useMemo(()=>{
+      let arr = [...activeItems];
+      if (search.trim()) arr = arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase())||i.notes?.toLowerCase().includes(search.toLowerCase()));
+      if (fRoom   !== "all") arr = arr.filter(i=>i.roomId===fRoom);
+      if (fStatus !== "all") arr = arr.filter(i=>i.status===fStatus);
+      if (fPrio   !== "all") arr = arr.filter(i=>i.priority===fPrio);
+      if (fStar)             arr = arr.filter(i=>i.starred);
+      if (fPromo)            arr = arr.filter(i=>!!getPromoInfo(i));
+      arr.sort((a,b)=>{
+        if (sort==="name")   return (a.name||"").localeCompare(b.name||"","pt");
+        if (sort==="price_asc")  return (parseFloat(a.price)||0)-(parseFloat(b.price)||0);
+        if (sort==="price_desc") return (parseFloat(b.price)||0)-(parseFloat(a.price)||0);
+        if (sort==="prio")  { const p={high:0,normal:1,low:2}; return (p[a.priority]||1)-(p[b.priority]||1); }
+        if (sort==="recent"){ try{return new Date(b.createdAt||0)-new Date(a.createdAt||0);}catch{return 0;} }
+        return 0;
+      });
       return arr;
-    },[activeItems,search,fRoom,fStatus]);
-    // FIX #2: sugestões pelo nome do cômodo
-    const suggs=fRoom!=="all"?getRoomSuggestions(fRoom,rooms,activeItems):[];
+    },[activeItems,search,fRoom,fStatus,fPrio,fStar,fPromo,sort]);
+
+    const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||search;
+    const clearFilters = ()=>{ setFRoom("all");setFStatus("all");setFPrio("all");setFStar(false);setFPromo(false);setSearch(""); };
+    const suggs = fRoom!=="all" ? getRoomSuggestions(fRoom,rooms,activeItems) : [];
+
     return (
-      <div style={{display:"flex",flexDirection:"column",gap:18}}>
+      <div style={{display:"flex",flexDirection:"column",gap:16}}>
+        {/* Header */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-          <div><h1 className="fd" style={{fontSize:27,fontWeight:600}}>Meus Itens</h1><p style={{color:"var(--tx2)",fontSize:13,marginTop:2}}>{filtered.length} de {activeItems.length} · {activeItems.filter(i=>i.status==="bought").length} comprados</p></div>
-          <div style={{display:"flex",gap:7}}><button className="btn btn-s" style={{fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button><button className="btn btn-p" style={{fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Adicionar</button></div>
-        </div>
-        <div style={{position:"relative"}}>
-          <Search size={14} style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"var(--tx3)"}}/>
-          <input className="inp" placeholder="Buscar..." value={search} onChange={e=>setSearch(e.target.value)} style={{paddingLeft:37}}/>
-          {search&&<button className="btn btn-g bico" onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)"}}><X size={13}/></button>}
-        </div>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-          <span style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em"}}>Cômodo:</span>
-          {[{id:"all",name:"Todos"},...rooms].map(r=><button key={r.id} className={`chip ${fRoom===r.id?"on":""}`} onClick={()=>setFRoom(r.id)}>{r.name}</button>)}
-        </div>
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-          <span style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em"}}>Status:</span>
-          {[{id:"all",l:"Todos"},{id:"want",l:"🛒 Pendentes"},{id:"bought",l:"✅ Comprados"}].map(s=><button key={s.id} className={`chip ${fStatus===s.id?"on":""}`} onClick={()=>setFStatus(s.id)}>{s.l}</button>)}
-          <div style={{marginLeft:"auto",display:"flex",gap:4}}>
-            <button className="btn btn-g bico" onClick={()=>setVw("grid")} style={vw==="grid"?{background:"var(--bg3)",color:"var(--p)"}:{}}><Grid3X3 size={14}/></button>
-            <button className="btn btn-g bico" onClick={()=>setVw("list")} style={vw==="list"?{background:"var(--bg3)",color:"var(--p)"}:{}}><List size={14}/></button>
+          <div>
+            <h1 className="fd" style={{fontSize:27,fontWeight:600}}>Meus Itens</h1>
+            <p style={{color:"var(--tx2)",fontSize:13,marginTop:2}}>
+              {filtered.length} de {activeItems.length} · {activeItems.filter(i=>i.status==="bought").length} comprados
+            </p>
+          </div>
+          <div style={{display:"flex",gap:7}}>
+            <button className="btn btn-s" style={{fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button>
+            <button className="btn btn-p" style={{fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Adicionar</button>
           </div>
         </div>
-        {suggs.length>0&&<div style={{background:"var(--bg2)",border:"1.5px dashed var(--bdr2)",borderRadius:12,padding:"13px 15px"}}>
-          <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:9,display:"flex",alignItems:"center",gap:5}}><Sparkles size={11}/>Sugestões — {rooms.find(r=>r.id===fRoom)?.name}</p>
-          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>{suggs.map(s=><button key={s} className="sch" onClick={()=>openAdd({prefillName:s,prefillRoom:fRoom})}><Plus size={9}/>{s}</button>)}</div>
-        </div>}
-        {itemsLoading?<div style={{display:"flex",justifyContent:"center",padding:40}}><Loader2 size={24} style={{color:"var(--p)",animation:"spin 1s linear infinite"}}/></div>:
-          filtered.length===0?<div className="empty"><div className="eico"><Search size={26} style={{color:"var(--tx3)"}}/></div><p style={{fontWeight:700,fontSize:15}}>Nenhum item encontrado</p><button className="btn btn-p" onClick={()=>openAdd()}><Plus size={13}/>Adicionar</button></div>:
+
+        {/* Search */}
+        <div style={{position:"relative"}}>
+          <Search size={14} style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"var(--tx3)"}}/>
+          <input className="inp" placeholder="Buscar por nome, observação..." value={search}
+            onChange={e=>setSearch(e.target.value)} style={{paddingLeft:37,paddingRight:search?36:14}}/>
+          {search&&<button className="btn btn-g bico" onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)"}}><X size={13}/></button>}
+        </div>
+
+        {/* Filter row 1: cômodo */}
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",display:"flex",alignItems:"center",gap:4}}><Home size={10}/>Cômodo</span>
+          {[{id:"all",name:"Todos"},...rooms].map(r=>(
+            <button key={r.id} className={`chip ${fRoom===r.id?"on":""}`} onClick={()=>setFRoom(r.id)}>{r.name}</button>
+          ))}
+        </div>
+
+        {/* Filter row 2: status + prio + special */}
+        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
+          <span style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",display:"flex",alignItems:"center",gap:4}}><Filter size={10}/>Filtros</span>
+          {[{id:"all",l:"Todos"},{id:"want",l:"🛒 Pendentes"},{id:"bought",l:"✅ Comprados"}].map(s=>(
+            <button key={s.id} className={`chip ${fStatus===s.id?"on":""}`} onClick={()=>setFStatus(s.id)}>{s.l}</button>
+          ))}
+          {[{id:"all",l:"Prio: Todas"},{id:"high",l:"⚡ Alta"},{id:"normal",l:"Normal"},{id:"low",l:"Baixa"}].map(p=>(
+            <button key={p.id} className={`chip ${fPrio===p.id?"on":""}`} onClick={()=>setFPrio(p.id)}>{p.l}</button>
+          ))}
+          <button className={`chip ${fStar?"on":""}`} onClick={()=>setFStar(v=>!v)} style={{display:"flex",alignItems:"center",gap:4}}>
+            <Star size={11}/>Favoritos
+          </button>
+          <button className={`chip ${fPromo?"on":""}`} onClick={()=>setFPromo(v=>!v)} style={{display:"flex",alignItems:"center",gap:4}}>
+            <BadgePercent size={11}/>Promoção
+          </button>
+        </div>
+
+        {/* Sort + view toggle + clear */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div style={{display:"flex",gap:7,alignItems:"center"}}>
+            <span style={{fontSize:11.5,color:"var(--tx3)",display:"flex",alignItems:"center",gap:4}}><ArrowUpDown size={12}/>Ordenar:</span>
+            <select className="inp" value={sort} onChange={e=>setSort(e.target.value)}
+              style={{width:"auto",padding:"5px 10px",fontSize:12.5,cursor:"pointer"}}>
+              <option value="recent">🕐 Mais recente</option>
+              <option value="name">🔤 Nome A–Z</option>
+              <option value="price_desc">💰 Maior preço</option>
+              <option value="price_asc">💸 Menor preço</option>
+              <option value="prio">⚡ Prioridade</option>
+            </select>
+            {hasFilters&&(
+              <button className="btn btn-g" onClick={clearFilters}
+                style={{fontSize:11.5,color:"var(--r)",gap:4,padding:"5px 9px"}}>
+                <X size={11}/>Limpar filtros
+              </button>
+            )}
+          </div>
+          <div style={{display:"flex",gap:4}}>
+            <button className="btn btn-g bico" title="Grade" onClick={()=>setVw("grid")} style={vw==="grid"?{background:"var(--bg3)",color:"var(--p)"}:{}}><Grid3X3 size={14}/></button>
+            <button className="btn btn-g bico" title="Lista" onClick={()=>setVw("list")} style={vw==="list"?{background:"var(--bg3)",color:"var(--p)"}:{}}><List size={14}/></button>
+          </div>
+        </div>
+
+        {/* Room suggestions */}
+        {suggs.length>0&&(
+          <div style={{background:"var(--bg2)",border:"1.5px dashed var(--bdr2)",borderRadius:12,padding:"13px 15px"}}>
+            <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",marginBottom:9,display:"flex",alignItems:"center",gap:5}}>
+              <Sparkles size={11}/>Sugestões — {rooms.find(r=>r.id===fRoom)?.name}
+            </p>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {suggs.map(s=><button key={s} className="sch" onClick={()=>openAdd({prefillName:s,prefillRoom:fRoom})}><Plus size={9}/>{s}</button>)}
+            </div>
+          </div>
+        )}
+
+        {/* Items grid/list */}
+        {itemsLoading ? (
+          <div style={{display:"flex",justifyContent:"center",padding:40}}>
+            <Loader2 size={24} style={{color:"var(--p)",animation:"spin 1s linear infinite"}}/>
+          </div>
+        ) : filtered.length===0 ? (
+          <div className="empty">
+            <div className="eico"><Search size={26} style={{color:"var(--tx3)"}}/></div>
+            <p style={{fontWeight:700,fontSize:15}}>Nenhum item encontrado</p>
+            <p style={{fontSize:13,color:"var(--tx3)"}}>
+              {hasFilters?"Ajuste os filtros ou ":""}
+              <button className="btn btn-p" onClick={()=>openAdd()} style={{marginLeft:hasFilters?8:0}}><Plus size={13}/>Adicionar</button>
+            </p>
+            {hasFilters&&<button className="btn btn-s" style={{marginTop:4,fontSize:12}} onClick={clearFilters}><X size={12}/>Limpar filtros</button>}
+          </div>
+        ) : (
           <div style={{display:"grid",gridTemplateColumns:vw==="grid"?"repeat(auto-fill,minmax(280px,1fr))":"1fr",gap:9}}>
             {filtered.map(item=>(
               <ItemCard key={item.id} item={item} rooms={rooms}
@@ -1234,7 +1638,7 @@ export default function App() {
                 onUpdatePrice={itemsHook.updatePriceOffers}/>
             ))}
           </div>
-        }
+        )}
       </div>
     );
   };
@@ -1315,7 +1719,7 @@ export default function App() {
             {pending>0&&view==="dashboard"&&<span style={{background:"var(--p)",color:"white",fontSize:10.5,fontWeight:700,padding:"2px 8px",borderRadius:99,flexShrink:0}}>{pending} pendentes</span>}
           </div>
           <div style={{display:"flex",gap:6,flexShrink:0}}>
-            {view!=="trash"&&<><button className="btn btn-s" style={{padding:"7px 11px",fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button><button className="btn btn-p" style={{padding:"7px 13px",fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Item</button></>}
+            {view!=="trash"&&view!=="summary"&&<><button className="btn btn-s" style={{padding:"7px 11px",fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button><button className="btn btn-p" style={{padding:"7px 13px",fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Item</button></>}
           </div>
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"24px 20px"}}>
@@ -1323,6 +1727,7 @@ export default function App() {
             {view==="dashboard" && <DashboardSimple/>}
             {view==="items"     && <ItemsSimple/>}
             {view==="rooms"     && <RoomsSimple/>}
+            {view==="summary"   && <SummaryView/>}
             {view==="trash"     && <TrashView items={items} rooms={rooms} onRestore={handleRestoreItem} onPermanentDelete={handlePermanentDelete} onEmptyTrash={handleEmptyTrash}/>}
           </div>
         </div>

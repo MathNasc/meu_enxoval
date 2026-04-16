@@ -1,4 +1,4 @@
 {
-  "/api/complete-home/route": "app/api/complete-home/route.js",
+  "/api/compare-prices/route": "app/api/compare-prices/route.js",
   "/page": "app/page.js"
 }
