@@ -154,16 +154,30 @@ const ROOM_SUGGESTIONS_BY_NAME = {
 };
 // Helper: dado um room id, retorna suas sugestões pelo nome normalizado
 function getRoomSuggestions(roomId, rooms, existingItems) {
-  const room = rooms.find(r => r.id === roomId);
-  if (!room) return [];
-  const key = room.name.toLowerCase().trim()
-    .normalize("NFD").replace(/[̀-ͯ]/g, ""); // remove acentos
-  // tenta match exato ou parcial
-  const list = ROOM_SUGGESTIONS_BY_NAME[key] ||
-    Object.entries(ROOM_SUGGESTIONS_BY_NAME).find(([k]) => key.includes(k))?.[1] || [];
-  return list.filter(s =>
-    !existingItems.some(i => i?.name?.toLowerCase() === s.toLowerCase())
-  ).slice(0, 6);
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const safeItems = Array.isArray(existingItems) ? existingItems : [];
+
+  const room = safeRooms.find(r => r?.id === roomId);
+  if (!room || !room?.name) return [];
+
+  const key = room.name
+    .toLowerCase()
+    .trim()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+  const list =
+    ROOM_SUGGESTIONS_BY_NAME[key] ||
+    Object.entries(ROOM_SUGGESTIONS_BY_NAME).find(([k]) =>
+      key.includes(k)
+    )?.[1] ||
+    [];
+
+  return list
+    .filter(s =>
+      !safeItems.some(i => i?.name?.toLowerCase?.() === s.toLowerCase())
+    )
+    .slice(0, 6);
 }
 
 const STORE_MAP = [
@@ -186,7 +200,7 @@ const PALETTE = ["#1272AA","#2A9D8F","#E9A830","#7058C8","#D4875A","#D94F7A","#2
 
 const getIcon  = (k) => ICONS_MAP[k] || Home;
 const uid      = ()  => Math.random().toString(36).slice(2)+Date.now().toString(36);
-const fmt      = (v) => { const n=parseFloat(v); return isNaN(n)?"—":n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); };
+const fmt = useCallback((v) => { const n=parseFloat(v); return isNaN(n)?"—":n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); };
 const daysLeft = (d) => { if(!d) return null; try{const t=new Date(d+"T00:00:00"),n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/86400000);}catch{return null;} };
 const getStore = (url) => { if(!url) return null; try{const h=new URL(url).hostname.toLowerCase();return STORE_MAP.find(s=>h.includes(s.p))||null;}catch{return null;} };
 const todayStr = () => new Date().toISOString().slice(0,10);
@@ -617,19 +631,36 @@ function CompleteHomeModal({ rooms=[], items=[], onAddItems, onClose }) {
   const [error,       setError]       = useState("");
   const [step,        setStep]        = useState(1);
 
-  const handleGenerate = async () => {
-    setLoading(true); setError("");
-    try {
-      const result = await AI.completeHome(rooms, items, aptSize);
-      const arr    = Array.isArray(result) ? result : (result?.items || []);
-      const valid  = arr.filter(i => rooms.some(r => r.id === i.roomId));
-      setSuggestions(valid);
-      setSelected(new Set(valid.map((_, i) => i)));
-      setStep(2);
-    } catch (e) {
-      setError("Erro ao gerar sugestões. Tente novamente. (" + e.message + ")");
-    } finally { setLoading(false); }
-  };
+const handleGenerate = async () => {
+  setLoading(true); setError("");
+  try {
+    const result = await AI.completeHome(rooms, items, aptSize);
+    const arr    = Array.isArray(result) ? result : (result?.items || []);
+
+    const existingNames = new Set(items.map(i => i.name?.toLowerCase()));
+
+    const valid = arr.filter(i =>
+      i?.name &&
+      !existingNames.has(i.name.toLowerCase()) &&
+      rooms.some(r => r.id === i.roomId)
+    );
+
+    setSuggestions(valid);
+
+    // Seleciona apenas itens de prioridade alta por padrão
+    setSelected(new Set(
+      valid
+        .map((item, i) => item.priority === "high" ? i : null)
+        .filter(i => i !== null)
+    ));
+
+    setStep(2);
+  } catch (e) {
+    setError("Erro ao gerar sugestões. Tente novamente. (" + e.message + ")");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const toggle = (idx) => setSelected(s => {
     const n = new Set(s);
@@ -637,26 +668,33 @@ function CompleteHomeModal({ rooms=[], items=[], onAddItems, onClose }) {
     return n;
   });
 
-  const handleAdd = () => {
-    const toAdd = suggestions
-      .filter((_, i) => selected.has(i))
-      .map(s => ({
-        name:         s.name,
-        roomId:       s.roomId,
-        price:        s.estimatedPrice?.toString() || "",
-        priority:     s.priority || "normal",
-        status:       "want",
-        notes:        "",
-        starred:      false,
-        imageUrl:     "",
-        link:         "",
-        priceHistory: s.estimatedPrice
-          ? [{ price: s.estimatedPrice, date: new Date().toISOString().slice(0,10), source: "estimate" }]
-          : [],
-        priceOffers: [],
-      }));
-    onAddItems(toAdd);
-  };
+const handleAdd = () => {
+  const toAdd = suggestions
+    .filter((_, i) => selected.has(i))
+    .map(s => ({
+      name: s.name,
+      roomId: s.roomId,
+      price: s.estimatedPrice?.toString() || "",
+      priority: s.priority || "normal",
+      status: "want",
+      notes: "",
+      starred: false,
+      imageUrl: "",
+      link: "",
+      priceHistory: s.estimatedPrice
+        ? [{
+            price: s.estimatedPrice,
+            date: new Date().toISOString().slice(0,10),
+            source: "estimate"
+          }]
+        : [],
+      priceOffers: [],
+    }));
+
+  if (toAdd.length === 0) return;
+
+  onAddItems(toAdd);
+};
 
   const sizes = ["Studio", "1 quarto", "2 quartos", "3 quartos", "4+ quartos"];
 
@@ -969,19 +1007,54 @@ const FILTER_INITIAL = {
 
 function filterReducer(state, action) {
   switch (action.type) {
-    case "SET_SEARCH":  return { ...state, search:  action.payload };
-    case "SET_ROOM":    return { ...state, fRoom:   action.payload };
-    case "SET_STATUS":  return { ...state, fStatus: action.payload };
-    case "SET_PRIO":    return { ...state, fPrio:   action.payload };
-    case "TOGGLE_STAR": return { ...state, fStar:   !state.fStar   };
-    case "TOGGLE_PROMO":return { ...state, fPromo:  !state.fPromo  };
-    case "SET_SORT":      return { ...state, sort:     action.payload };
-    case "SET_VW":        return { ...state, vw:       action.payload };
-    case "TOGGLE_PANEL":  return { ...state, filtersOpen: !state.filtersOpen };
-    case "SET_MIN_PRICE": return { ...state, minPrice: action.payload };
-    case "SET_MAX_PRICE": return { ...state, maxPrice: action.payload };
-    case "CLEAR":         return { ...FILTER_INITIAL, vw: state.vw, filtersOpen: state.filtersOpen }; // mantém grid/list e painel aberto/fechado
-    default:            return state;
+    case "SET_SEARCH":  
+      return { ...state, search: action.payload };
+
+    case "SET_ROOM":    
+      return { ...state, fRoom: action.payload };
+
+    case "SET_STATUS":  
+      return { ...state, fStatus: action.payload };
+
+    case "SET_PRIO":    
+      return { ...state, fPrio: action.payload };
+
+    case "TOGGLE_STAR": 
+      return { ...state, fStar: !state.fStar };
+
+    case "TOGGLE_PROMO":
+      return { ...state, fPromo: !state.fPromo };
+
+    case "SET_SORT":    
+      return { ...state, sort: action.payload };
+
+    case "SET_VW":      
+      return { ...state, vw: action.payload };
+
+    case "TOGGLE_PANEL":
+      return { ...state, filtersOpen: !state.filtersOpen };
+
+    case "SET_MIN_PRICE":
+      return { ...state, minPrice: action.payload };
+
+    case "SET_MAX_PRICE":
+      return { ...state, maxPrice: action.payload };
+
+    case "CLEAR":
+      return {
+        ...state, // mantém sort, vw e painel
+        search: "",
+        fRoom: "all",
+        fStatus: "all",
+        fPrio: "all",
+        fStar: false,
+        fPromo: false,
+        minPrice: "",
+        maxPrice: ""
+      };
+
+    default:
+      return state;
   }
 }
 
@@ -1069,24 +1142,47 @@ export default function App() {
     await roomsHook.deleteRoom(id);
   },[roomsHook,showToast]);
 
-  const handleAddItems = useCallback(async (arr) => {
-    for (const item of arr) {
-      await itemsHook.addItem(item);
-    }
+const handleAddItems = useCallback(async (arr) => {
+  try {
+    await Promise.all(arr.map(item => itemsHook.addItem(item)));
     setHomeModal(false);
-    showToast(`${arr.length} item${arr.length !== 1 ? "s" : ""} adicionado${arr.length !== 1 ? "s" : ""}!`, "success");
-  }, [itemsHook, showToast]);
+    showToast(
+      `${arr.length} item${arr.length !== 1 ? "s" : ""} adicionado${arr.length !== 1 ? "s" : ""}!`,
+      "success"
+    );
+  } catch (e) {
+    showToast("Erro ao adicionar itens", "error");
+  }
+}, [itemsHook, showToast]);
 
   const openAdd=useCallback((prefill=null)=>{
     setItemModal(prefill?.prefillName?{name:prefill.prefillName,roomId:prefill.prefillRoom||roomsHook.rooms[0]?.id}:prefill||"new");
   },[roomsHook.rooms]);
 
-  const exportCSV=useCallback(()=>{
-    const h=["Nome","Cômodo","Status","Preço","Prioridade","Link","Notas"];
-    const rows=activeItems.map(i=>{const r=roomsHook.rooms.find(x=>x.id===i.roomId);return[i.name||"",r?.name||"",i.status==="bought"?"Comprado":"Quero comprar",i.price||"",i.priority||"",i.link||"",i.notes||""];});
-    const csv=[h,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
-    const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,\uFEFF"+encodeURIComponent(csv);a.download="enxoval.csv";a.click();
-  },[]);
+const exportCSV = useCallback(() => {
+  const h = ["Nome","Cômodo","Status","Preço","Prioridade","Link","Notas"];
+  const rows = activeItems.map(i => {
+    const r = roomsHook.rooms.find(x => x.id === i.roomId);
+    return [
+      i.name || "",
+      r?.name || "",
+      i.status === "bought" ? "Comprado" : "Quero comprar",
+      i.price || "",
+      i.priority || "",
+      i.link || "",
+      i.notes || ""
+    ];
+  });
+
+  const csv = [h, ...rows]
+    .map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(","))
+    .join("\n");
+
+  const a = document.createElement("a");
+  a.href = "data:text/csv;charset=utf-8,\uFEFF" + encodeURIComponent(csv);
+  a.download = "enxoval.csv";
+  a.click();
+}, [activeItems, roomsHook.rooms]);
 
 
   // ── Summary View ─────────────────────────────────────
@@ -1357,7 +1453,7 @@ function RoomCharts({ items = [], rooms = [] }) {
       .map(d => ({ name: d.fullName, value: d.value, color: d.color }))
   ), [data]);
 
-  const fmt = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  const fmt = useCallback((v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
   if (!data.length) return (
     <div style={{ textAlign: "center", padding: "32px 0", color: "var(--tx3)", fontSize: 13 }}>
@@ -1366,24 +1462,28 @@ function RoomCharts({ items = [], rooms = [] }) {
   );
 
   // ── Tooltip customizado ─────────────────────────────────
-  const CustomTooltip = ({ active, payload, label }) => {
-    if (!active || !payload?.length) return null;
-    const room = data.find(d => d.name === label) || {};
-    return (
-      <div style={{
-        background: "var(--bg)", border: "1.5px solid var(--bdr)",
-        borderRadius: 10, padding: "10px 14px", fontSize: 12.5,
-        boxShadow: "0 4px 20px rgba(0,0,0,.15)",
-      }}>
-        <p style={{ fontWeight: 700, marginBottom: 6, color: "var(--tx)" }}>{room.fullName || label}</p>
-        {payload.map((p, i) => (
-          <p key={i} style={{ color: p.color || p.fill, marginBottom: 2 }}>
-            {p.name}: <b>{typeof p.value === "number" && p.value > 100 ? fmt(p.value) : p.value}</b>
-          </p>
-        ))}
-      </div>
-    );
-  };
+const CustomTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+
+  const room = data.find(d => d.name === label || d.fullName === label) || {};
+
+  return (
+    <div style={{
+      background: "var(--bg)", border: "1.5px solid var(--bdr)",
+      borderRadius: 10, padding: "10px 14px", fontSize: 12.5,
+      boxShadow: "0 4px 20px rgba(0,0,0,.15)",
+    }}>
+      <p style={{ fontWeight: 700, marginBottom: 6, color: "var(--tx)" }}>
+        {room.fullName || label}
+      </p>
+      {payload.map((p, i) => (
+        <p key={i} style={{ color: p.color || p.fill, marginBottom: 2 }}>
+          {p.name}: <b>{typeof p.value === "number" ? fmt(p.value) : p.value}</b>
+        </p>
+      ))}
+    </div>
+  );
+};
 
   // ── Tooltip pizza ───────────────────────────────────────
   const PieTooltip = ({ active, payload }) => {
@@ -1827,7 +1927,7 @@ function RoomCharts({ items = [], rooms = [] }) {
       const mx = parseFloat(maxPrice);
       if (!isNaN(mx)) arr = arr.filter(i => parseFloat(i.price||0) <= mx);
     }
-    arr.sort((a,b)=>{
+    arr = [...arr].sort((a,b)=>{
       if (sort==="name")       return (a.name||"").localeCompare(b.name||"","pt");
       if (sort==="price_asc")  return (parseFloat(a.price)||0)-(parseFloat(b.price)||0);
       if (sort==="price_desc") return (parseFloat(b.price)||0)-(parseFloat(a.price)||0);
@@ -1841,7 +1941,8 @@ function RoomCharts({ items = [], rooms = [] }) {
   const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||!!search.trim()||minPrice!==""||maxPrice!=="";
 
   const ItemsSimple=()=>{
-    const clearFilters = ()=> dispatchFilter({ type:"CLEAR" });
+    const clearFilters = () => {dispatchFilter({ type: "CLEAR" });
+	};
     const suggs = fRoom!=="all" ? getRoomSuggestions(fRoom,rooms,activeItems) : [];
 
     return (
@@ -1919,8 +2020,16 @@ function RoomCharts({ items = [], rooms = [] }) {
                 fontSize:9,fontWeight:800,
                 display:"flex",alignItems:"center",justifyContent:"center",
               }}>
-                {[fRoom!=="all",fStatus!=="all",fPrio!=="all",fStar,fPromo,
-                  minPrice!=="",maxPrice!==""].filter(Boolean).length}
+				{[
+				fRoom !== "all",
+				fStatus !== "all",
+				fPrio !== "all",
+				fStar,
+				fPromo,
+				minPrice !== "",
+				maxPrice !== "",
+				!!search.trim()
+				].filter(Boolean).length}
               </span>
             )}
           </button>
