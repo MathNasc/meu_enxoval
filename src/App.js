@@ -28,6 +28,12 @@ import { useSettings } from "./lib/hooks/useSettings";
 import AuthScreen     from "./components/AuthScreen";
 import HouseholdModal from "./components/HouseholdModal";
 
+import dynamic from "next/dynamic";
+
+const RoomCharts = dynamic(() => import("./RoomCharts"), {
+  ssr: false
+});
+
 // ════════════════════════════════════════════════════════
 // STYLES (idêntico ao v4 — mantido para brevidade)
 // ════════════════════════════════════════════════════════
