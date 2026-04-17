@@ -206,14 +206,17 @@ const PALETTE = ["#1272AA","#2A9D8F","#E9A830","#7058C8","#D4875A","#D94F7A","#2
 
 const getIcon  = (k) => ICONS_MAP[k] || Home;
 const uid      = ()  => Math.random().toString(36).slice(2)+Date.now().toString(36);
-const fmt = useCallback((v) => { 
+const fmt = useCallback((v) => {
   const n = parseFloat(v);
   return isNaN(n)
     ? "—"
-    : n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    : n.toLocaleString("pt-BR", {
+        style: "currency",
+        currency: "BRL",
+      });
 }, []);
-const daysLeft = (d) => { if(!d) return null; try{const t=new Date(d+"T00:00:00"),n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/86400000);}catch{return null;} };
-const getStore = (url) => { if(!url) return null; try{const h=new URL(url).hostname.toLowerCase();return STORE_MAP.find(s=>h.includes(s.p))||null;}catch{return null;} };
+const daysLeft = (d) => { if(!d) return null; try{const t=new Date(d+"T00:00:00"),n=new Date();n.setHours(0,0,0,0);return Math.round((t - n) / 86400000);;}catch{return null;} };
+const getStore = (url) => { if(!url) return null; try{const h=new URL(url).hostname.toLowerCase();return STORE_MAP.find(s => h.includes(s.p)) || null;}catch{return null;} };
 const todayStr = () => new Date().toISOString().slice(0,10);
 const isActive  = (i) => !i?.deletedAt;
 const isDeleted = (i) => !!i?.deletedAt;
