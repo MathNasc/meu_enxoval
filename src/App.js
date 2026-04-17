@@ -1,7 +1,7 @@
 // src/App.js — versão com Supabase Auth + banco de dados
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useReducer } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, CartesianGrid } from "recharts";
 import {
   Home, Plus, Trash2, ExternalLink, Check, Search, Moon, Sun,
@@ -750,11 +750,11 @@ function CompleteHomeModal({ rooms=[], items=[], onAddItems, onClose }) {
                     </div>
                     <div style={{ flex:1 }}>
                       <p style={{ fontWeight:600, fontSize:13.5 }}>{s.name}</p>
-                      <p style={{ fontSize:11, color:"var(--tx3)", display:"flex", alignItems:"center", gap:4, marginTop:1 }}>
+                      <p style={{ fontSize:11, color:"var(--tx3)", display:"flex", alignItems:"center", gap:4, marginTop:1, flexWrap:"wrap" }}>
                         <Icon size={9}/>{room?.name}
-                        {s.priority === "high" && (
-                          <span className="bdg bh" style={{ fontSize:9, marginLeft:2 }}>Alta</span>
-                        )}
+                        {s.priority === "high"   && <span className="bdg bh" style={{ fontSize:9 }}><Flame size={7}/>Essencial</span>}
+                        {s.priority === "normal" && <span className="bdg bw" style={{ fontSize:9 }}>Normal</span>}
+                        {s.priority === "low"    && <span style={{ fontSize:9, background:"var(--bg3)", color:"var(--tx3)", padding:"1px 6px", borderRadius:99, fontWeight:700 }}>Opcional</span>}
                       </p>
                     </div>
                     {s.estimatedPrice && (
@@ -946,6 +946,43 @@ function TrashView({items=[],rooms=[],onRestore,onPermanentDelete,onEmptyTrash})
 // ════════════════════════════════════════════════════════
 // MAIN APP — com Supabase
 // ════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════
+// FILTER REDUCER — estado único para todos os filtros de Meus Itens
+// Elevado ao App para sobreviver a re-renders e troca de abas.
+// ════════════════════════════════════════════════════════
+const FILTER_INITIAL = {
+  search:   "",
+  fRoom:    "all",
+  fStatus:  "all",
+  fPrio:    "all",
+  fStar:    false,
+  fPromo:   false,
+  minPrice:    "",      // "" = sem limite inferior
+  maxPrice:    "",      // "" = sem limite superior
+  sort:        "recent",
+  vw:          "grid",
+  filtersOpen: false,  // painel de filtros colapsável
+};
+
+function filterReducer(state, action) {
+  switch (action.type) {
+    case "SET_SEARCH":  return { ...state, search:  action.payload };
+    case "SET_ROOM":    return { ...state, fRoom:   action.payload };
+    case "SET_STATUS":  return { ...state, fStatus: action.payload };
+    case "SET_PRIO":    return { ...state, fPrio:   action.payload };
+    case "TOGGLE_STAR": return { ...state, fStar:   !state.fStar   };
+    case "TOGGLE_PROMO":return { ...state, fPromo:  !state.fPromo  };
+    case "SET_SORT":      return { ...state, sort:     action.payload };
+    case "SET_VW":        return { ...state, vw:       action.payload };
+    case "TOGGLE_PANEL":  return { ...state, filtersOpen: !state.filtersOpen };
+    case "SET_MIN_PRICE": return { ...state, minPrice: action.payload };
+    case "SET_MAX_PRICE": return { ...state, maxPrice: action.payload };
+    case "CLEAR":         return { ...FILTER_INITIAL, vw: state.vw, filtersOpen: state.filtersOpen }; // mantém grid/list e painel aberto/fechado
+    default:            return state;
+  }
+}
+
 export default function App() {
   const auth     = useAuth();
   const itemsHook= useItems(auth.householdId);
@@ -954,6 +991,7 @@ export default function App() {
 
   const [dk,      setDk]      = useState(false);
   const [view,    setView]    = useState("dashboard");
+  const [filters, dispatchFilter] = useReducer(filterReducer, FILTER_INITIAL);
   const [sidebar, setSidebar] = useState(false);
   const [toasts,  setToasts]  = useState([]);
 
@@ -1768,37 +1806,40 @@ function RoomCharts({ items = [], rooms = [] }) {
     );
   };
 
+  // Desestrutura o estado elevado de filtros
+  const { search, fRoom, fStatus, fPrio, fStar, fPromo, minPrice, maxPrice, sort, vw, filtersOpen } = filters;
+
+  const filtered = useMemo(()=>{
+    let arr = [...activeItems];
+    if (search.trim()) arr = arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase())||i.notes?.toLowerCase().includes(search.toLowerCase()));
+    if (fRoom   !== "all") arr = arr.filter(i=>i.roomId===fRoom);
+    if (fStatus !== "all") arr = arr.filter(i=>i.status===fStatus);
+    if (fPrio   !== "all") arr = arr.filter(i=>i.priority===fPrio);
+    if (fStar)             arr = arr.filter(i=>i.starred);
+    if (fPromo)            arr = arr.filter(i=>!!getPromoInfo(i));
+    if (minPrice !== "") {
+      const mn = parseFloat(minPrice);
+      if (!isNaN(mn)) arr = arr.filter(i => parseFloat(i.price||0) >= mn);
+    }
+    if (maxPrice !== "") {
+      const mx = parseFloat(maxPrice);
+      if (!isNaN(mx)) arr = arr.filter(i => parseFloat(i.price||0) <= mx);
+    }
+    arr.sort((a,b)=>{
+      if (sort==="name")       return (a.name||"").localeCompare(b.name||"","pt");
+      if (sort==="price_asc")  return (parseFloat(a.price)||0)-(parseFloat(b.price)||0);
+      if (sort==="price_desc") return (parseFloat(b.price)||0)-(parseFloat(a.price)||0);
+      if (sort==="prio")  { const p={high:0,normal:1,low:2}; return (p[a.priority]||1)-(p[b.priority]||1); }
+      if (sort==="recent"){ try{return new Date(b.createdAt||0)-new Date(a.createdAt||0);}catch{return 0;} }
+      return 0;
+    });
+    return arr;
+  },[activeItems,search,fRoom,fStatus,fPrio,fStar,fPromo,minPrice,maxPrice,sort]);
+
+  const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||!!search.trim()||minPrice!==""||maxPrice!=="";
+
   const ItemsSimple=()=>{
-    const [search,  setSearch]  = useState("");
-    const [fRoom,   setFRoom]   = useState("all");
-    const [fStatus, setFStatus] = useState("all");
-    const [fPrio,   setFPrio]   = useState("all");
-    const [fStar,   setFStar]   = useState(false);
-    const [fPromo,  setFPromo]  = useState(false);
-    const [sort,    setSort]    = useState("recent");
-    const [vw,      setVw]      = useState("grid");
-
-    const filtered = useMemo(()=>{
-      let arr = [...activeItems];
-      if (search.trim()) arr = arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase())||i.notes?.toLowerCase().includes(search.toLowerCase()));
-      if (fRoom   !== "all") arr = arr.filter(i=>i.roomId===fRoom);
-      if (fStatus !== "all") arr = arr.filter(i=>i.status===fStatus);
-      if (fPrio   !== "all") arr = arr.filter(i=>i.priority===fPrio);
-      if (fStar)             arr = arr.filter(i=>i.starred);
-      if (fPromo)            arr = arr.filter(i=>!!getPromoInfo(i));
-      arr.sort((a,b)=>{
-        if (sort==="name")   return (a.name||"").localeCompare(b.name||"","pt");
-        if (sort==="price_asc")  return (parseFloat(a.price)||0)-(parseFloat(b.price)||0);
-        if (sort==="price_desc") return (parseFloat(b.price)||0)-(parseFloat(a.price)||0);
-        if (sort==="prio")  { const p={high:0,normal:1,low:2}; return (p[a.priority]||1)-(p[b.priority]||1); }
-        if (sort==="recent"){ try{return new Date(b.createdAt||0)-new Date(a.createdAt||0);}catch{return 0;} }
-        return 0;
-      });
-      return arr;
-    },[activeItems,search,fRoom,fStatus,fPrio,fStar,fPromo,sort]);
-
-    const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||search;
-    const clearFilters = ()=>{ setFRoom("all");setFStatus("all");setFPrio("all");setFStar(false);setFPromo(false);setSearch(""); };
+    const clearFilters = ()=> dispatchFilter({ type:"CLEAR" });
     const suggs = fRoom!=="all" ? getRoomSuggestions(fRoom,rooms,activeItems) : [];
 
     return (
@@ -1817,63 +1858,250 @@ function RoomCharts({ items = [], rooms = [] }) {
           </div>
         </div>
 
-        {/* Search */}
+        {/* ── Search bar ─────────────────────────────── */}
         <div style={{position:"relative"}}>
           <Search size={14} style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"var(--tx3)"}}/>
-          <input className="inp" placeholder="Buscar por nome, observação..." value={search}
-            onChange={e=>setSearch(e.target.value)} style={{paddingLeft:37,paddingRight:search?36:14}}/>
-          {search&&<button className="btn btn-g bico" onClick={()=>setSearch("")} style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)"}}><X size={13}/></button>}
+          <input className="inp" placeholder="Buscar por nome, observação..."
+            value={search}
+            onChange={e=>dispatchFilter({type:"SET_SEARCH",payload:e.target.value})}
+            style={{paddingLeft:37,paddingRight:search?36:14}}/>
+          {search&&(
+            <button className="btn btn-g bico"
+              onClick={()=>dispatchFilter({type:"SET_SEARCH",payload:""})}
+              style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)"}}>
+              <X size={13}/>
+            </button>
+          )}
         </div>
 
-        {/* Filter row 1: cômodo */}
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-          <span style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",display:"flex",alignItems:"center",gap:4}}><Home size={10}/>Cômodo</span>
-          {[{id:"all",name:"Todos"},...rooms].map(r=>(
-            <button key={r.id} className={`chip ${fRoom===r.id?"on":""}`} onClick={()=>setFRoom(r.id)}>{r.name}</button>
-          ))}
-        </div>
-
-        {/* Filter row 2: status + prio + special */}
-        <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-          <span style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",letterSpacing:".07em",display:"flex",alignItems:"center",gap:4}}><Filter size={10}/>Filtros</span>
-          {[{id:"all",l:"Todos"},{id:"want",l:"🛒 Pendentes"},{id:"bought",l:"✅ Comprados"}].map(s=>(
-            <button key={s.id} className={`chip ${fStatus===s.id?"on":""}`} onClick={()=>setFStatus(s.id)}>{s.l}</button>
-          ))}
-          {[{id:"all",l:"Prio: Todas"},{id:"high",l:"⚡ Alta"},{id:"normal",l:"Normal"},{id:"low",l:"Baixa"}].map(p=>(
-            <button key={p.id} className={`chip ${fPrio===p.id?"on":""}`} onClick={()=>setFPrio(p.id)}>{p.l}</button>
-          ))}
-          <button className={`chip ${fStar?"on":""}`} onClick={()=>setFStar(v=>!v)} style={{display:"flex",alignItems:"center",gap:4}}>
-            <Star size={11}/>Favoritos
-          </button>
-          <button className={`chip ${fPromo?"on":""}`} onClick={()=>setFPromo(v=>!v)} style={{display:"flex",alignItems:"center",gap:4}}>
-            <BadgePercent size={11}/>Promoção
-          </button>
-        </div>
-
-        {/* Sort + view toggle + clear */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-          <div style={{display:"flex",gap:7,alignItems:"center"}}>
-            <span style={{fontSize:11.5,color:"var(--tx3)",display:"flex",alignItems:"center",gap:4}}><ArrowUpDown size={12}/>Ordenar:</span>
-            <select className="inp" value={sort} onChange={e=>setSort(e.target.value)}
-              style={{width:"auto",padding:"5px 10px",fontSize:12.5,cursor:"pointer"}}>
+        {/* ── Filter bar: sort + view + toggle panel ─── */}
+        <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap"}}>
+          {/* Sort */}
+          <div style={{display:"flex",alignItems:"center",gap:6,flex:1,minWidth:180}}>
+            <ArrowUpDown size={13} style={{color:"var(--tx3)",flexShrink:0}}/>
+            <select className="inp" value={sort}
+              onChange={e=>dispatchFilter({type:"SET_SORT",payload:e.target.value})}
+              style={{flex:1,padding:"7px 10px",fontSize:12.5,cursor:"pointer"}}>
               <option value="recent">🕐 Mais recente</option>
               <option value="name">🔤 Nome A–Z</option>
               <option value="price_desc">💰 Maior preço</option>
               <option value="price_asc">💸 Menor preço</option>
               <option value="prio">⚡ Prioridade</option>
             </select>
+          </div>
+          {/* View toggle */}
+          <div style={{display:"flex",gap:3}}>
+            <button className="btn btn-g bico" title="Grade"
+              onClick={()=>dispatchFilter({type:"SET_VW",payload:"grid"})}
+              style={vw==="grid"?{background:"var(--bg3)",color:"var(--p)"}:{}}>
+              <Grid3X3 size={14}/>
+            </button>
+            <button className="btn btn-g bico" title="Lista"
+              onClick={()=>dispatchFilter({type:"SET_VW",payload:"list"})}
+              style={vw==="list"?{background:"var(--bg3)",color:"var(--p)"}:{}}>
+              <List size={14}/>
+            </button>
+          </div>
+          {/* Filter panel toggle button */}
+          <button
+            onClick={()=>dispatchFilter({type:"TOGGLE_PANEL"})}
+            className={`btn ${filtersOpen?"btn-p":"btn-s"}`}
+            style={{fontSize:12.5,gap:6,padding:"7px 13px",position:"relative"}}>
+            <Filter size={13}/>
+            Filtros
             {hasFilters&&(
-              <button className="btn btn-g" onClick={clearFilters}
-                style={{fontSize:11.5,color:"var(--r)",gap:4,padding:"5px 9px"}}>
-                <X size={11}/>Limpar filtros
-              </button>
+              <span style={{
+                position:"absolute",top:-5,right:-5,
+                width:17,height:17,borderRadius:"50%",
+                background:"var(--r)",color:"white",
+                fontSize:9,fontWeight:800,
+                display:"flex",alignItems:"center",justifyContent:"center",
+              }}>
+                {[fRoom!=="all",fStatus!=="all",fPrio!=="all",fStar,fPromo,
+                  minPrice!=="",maxPrice!==""].filter(Boolean).length}
+              </span>
+            )}
+          </button>
+          {/* Clear — only when filters active */}
+          {hasFilters&&(
+            <button className="btn btn-g" onClick={clearFilters}
+              style={{fontSize:11.5,color:"var(--r)",gap:4,padding:"5px 9px"}}>
+              <X size={11}/>Limpar
+            </button>
+          )}
+        </div>
+
+        {/* ── Filter panel (collapsible) ──────────────── */}
+        {filtersOpen&&(
+          <div style={{
+            background:"var(--bg2)",border:"1.5px solid var(--bdr)",
+            borderRadius:14,padding:"16px 18px",
+            display:"flex",flexDirection:"column",gap:16,
+          }}>
+            {/* Cômodo */}
+            <div>
+              <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",
+                letterSpacing:".07em",marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                <Home size={10}/>Cômodo
+              </p>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {[{id:"all",name:"Todos"},...rooms].map(r=>(
+                  <button key={r.id}
+                    className={`chip ${fRoom===r.id?"on":""}`}
+                    onClick={()=>dispatchFilter({type:"SET_ROOM",payload:r.id})}>
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Status */}
+            <div>
+              <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",
+                letterSpacing:".07em",marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                <ShoppingCart size={10}/>Status
+              </p>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {[{id:"all",l:"Todos"},{id:"want",l:"🛒 Pendentes"},{id:"bought",l:"✅ Comprados"}].map(s=>(
+                  <button key={s.id}
+                    className={`chip ${fStatus===s.id?"on":""}`}
+                    onClick={()=>dispatchFilter({type:"SET_STATUS",payload:s.id})}>
+                    {s.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Prioridade */}
+            <div>
+              <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",
+                letterSpacing:".07em",marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                <Flame size={10}/>Prioridade
+              </p>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                {[
+                  {id:"all",    l:"Todas",       color:null},
+                  {id:"high",   l:"⚡ Alta",      color:"var(--r)"},
+                  {id:"normal", l:"🔵 Normal",    color:"var(--p)"},
+                  {id:"low",    l:"📌 Baixa",     color:"var(--tx3)"},
+                ].map(p=>(
+                  <button key={p.id}
+                    className={`chip ${fPrio===p.id?"on":""}`}
+                    onClick={()=>dispatchFilter({type:"SET_PRIO",payload:p.id})}
+                    style={fPrio===p.id&&p.color?{background:p.color,borderColor:p.color}:{}}>
+                    {p.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Faixa de preço */}
+            <div>
+              <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",
+                letterSpacing:".07em",marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                <DollarSign size={10}/>Faixa de preço (R$)
+              </p>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <input type="number" min="0" step="50"
+                  placeholder="Mín"
+                  value={minPrice}
+                  onChange={e=>dispatchFilter({type:"SET_MIN_PRICE",payload:e.target.value})}
+                  style={{
+                    flex:1,padding:"8px 10px",background:"var(--bg)",
+                    border:"1.5px solid var(--bdr)",borderRadius:8,
+                    fontFamily:"var(--f)",fontSize:13,color:"var(--tx)",outline:"none",
+                    transition:"border-color .2s",
+                  }}
+                  onFocus={e=>e.target.style.borderColor="var(--p)"}
+                  onBlur={e=>e.target.style.borderColor="var(--bdr)"}
+                />
+                <span style={{color:"var(--tx3)",fontSize:12,flexShrink:0}}>até</span>
+                <input type="number" min="0" step="50"
+                  placeholder="Máx"
+                  value={maxPrice}
+                  onChange={e=>dispatchFilter({type:"SET_MAX_PRICE",payload:e.target.value})}
+                  style={{
+                    flex:1,padding:"8px 10px",background:"var(--bg)",
+                    border:"1.5px solid var(--bdr)",borderRadius:8,
+                    fontFamily:"var(--f)",fontSize:13,color:"var(--tx)",outline:"none",
+                    transition:"border-color .2s",
+                  }}
+                  onFocus={e=>e.target.style.borderColor="var(--p)"}
+                  onBlur={e=>e.target.style.borderColor="var(--bdr)"}
+                />
+                {(minPrice||maxPrice)&&(
+                  <button className="btn btn-g bico"
+                    onClick={()=>{
+                      dispatchFilter({type:"SET_MIN_PRICE",payload:""});
+                      dispatchFilter({type:"SET_MAX_PRICE",payload:""});
+                    }}>
+                    <X size={12}/>
+                  </button>
+                )}
+              </div>
+              {/* Quick price presets */}
+              <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>
+                {[
+                  {l:"Até R$100",   min:"",    max:"100" },
+                  {l:"R$100–500",   min:"100", max:"500" },
+                  {l:"R$500–1000",  min:"500", max:"1000"},
+                  {l:"Acima R$1k",  min:"1000",max:""    },
+                ].map(p=>{
+                  const active = minPrice===p.min && maxPrice===p.max;
+                  return (
+                    <button key={p.l}
+                      className={`chip ${active?"on":""}`}
+                      style={{fontSize:11.5}}
+                      onClick={()=>{
+                        dispatchFilter({type:"SET_MIN_PRICE",payload:active?"":p.min});
+                        dispatchFilter({type:"SET_MAX_PRICE",payload:active?"":p.max});
+                      }}>
+                      {p.l}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Especiais */}
+            <div>
+              <p style={{fontSize:10,fontWeight:700,color:"var(--tx3)",textTransform:"uppercase",
+                letterSpacing:".07em",marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                <Star size={10}/>Especiais
+              </p>
+              <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                <button
+                  className={`chip ${fStar?"on":""}`}
+                  onClick={()=>dispatchFilter({type:"TOGGLE_STAR"})}
+                  style={{display:"flex",alignItems:"center",gap:4}}>
+                  <Star size={11}/>Favoritos
+                </button>
+                <button
+                  className={`chip ${fPromo?"on":""}`}
+                  onClick={()=>dispatchFilter({type:"TOGGLE_PROMO"})}
+                  style={{display:"flex",alignItems:"center",gap:4}}>
+                  <BadgePercent size={11}/>Em promoção
+                </button>
+              </div>
+            </div>
+
+            {/* Active filter summary */}
+            {hasFilters&&(
+              <div style={{
+                paddingTop:12,borderTop:"1px solid var(--bdr)",
+                display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,
+              }}>
+                <p style={{fontSize:12,color:"var(--tx2)"}}>
+                  <b style={{color:"var(--p)"}}>{filtered.length}</b> resultado{filtered.length!==1?"s":""} com os filtros atuais
+                </p>
+                <button className="btn btn-g" onClick={clearFilters}
+                  style={{fontSize:12,color:"var(--r)",gap:4}}>
+                  <X size={11}/>Limpar todos
+                </button>
+              </div>
             )}
           </div>
-          <div style={{display:"flex",gap:4}}>
-            <button className="btn btn-g bico" title="Grade" onClick={()=>setVw("grid")} style={vw==="grid"?{background:"var(--bg3)",color:"var(--p)"}:{}}><Grid3X3 size={14}/></button>
-            <button className="btn btn-g bico" title="Lista" onClick={()=>setVw("list")} style={vw==="list"?{background:"var(--bg3)",color:"var(--p)"}:{}}><List size={14}/></button>
-          </div>
-        </div>
+        )}
 
         {/* Room suggestions */}
         {suggs.length>0&&(
@@ -1919,28 +2147,175 @@ function RoomCharts({ items = [], rooms = [] }) {
     );
   };
 
-  const RoomsSimple=()=>(
-    <div style={{display:"flex",flexDirection:"column",gap:22}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-        <div><h1 className="fd" style={{fontSize:27,fontWeight:600}}>Cômodos</h1><p style={{color:"var(--tx2)",fontSize:13,marginTop:2}}>{rooms.length} cômodos</p></div>
-        <button className="btn btn-p" onClick={()=>setRoomModal(true)}><Plus size={13}/>Novo cômodo</button>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:12}}>
-        {rooms.map(r=>{const Icon=getIcon(r.icon);const ri=activeItems.filter(i=>i.roomId===r.id);const b=ri.filter(i=>i.status==="bought").length;const t=ri.length;const p=t>0?Math.round((b/t)*100):0;const isDefault=["quarto","sala","cozinha","banheiro"].includes(r.id);return(
-          <div key={r.id} className="card clift au" style={{padding:"18px 20px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
-              <div style={{display:"flex",alignItems:"center",gap:11}}>
-                <div style={{width:42,height:42,borderRadius:12,background:`${r.color}20`,display:"flex",alignItems:"center",justifyContent:"center"}}><Icon size={20} style={{color:r.color}}/></div>
-                <div><h3 style={{fontWeight:700,fontSize:15}}>{r.name}</h3><p style={{fontSize:11.5,color:"var(--tx3)"}}>{t} {t===1?"item":"itens"}</p></div>
-              </div>
-              {!isDefault&&<DeleteButton onConfirm={()=>handleDeleteRoom(r.id)}/>}
-            </div>
-            {t>0?(<><div className="ptr" style={{marginBottom:8}}><div className="pfl" style={{width:`${p}%`,background:r.color}}/></div><div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"var(--tx3)"}}><span>{b}/{t} ({p}%)</span></div></>):<p style={{fontSize:12.5,color:"var(--tx3)",fontStyle:"italic"}}>Nenhum item ainda</p>}
+  // ── Dados agregados por cômodo (derivados de activeItems — sem query extra) ──
+  const roomStats = useMemo(() => rooms.map(r => {
+    const ri       = activeItems.filter(i => i.roomId === r.id);
+    const bought   = ri.filter(i => i.status === "bought");
+    const want     = ri.filter(i => i.status === "want");
+    const highPrio = ri.filter(i => i.priority === "high" && i.status !== "bought");
+    const totalVal = ri.filter(i => i.price).reduce((s,i) => s + parseFloat(i.price||0), 0);
+    const spentVal = bought.filter(i => i.price).reduce((s,i) => s + parseFloat(i.price||0), 0);
+    const pct      = ri.length > 0 ? Math.round((bought.length / ri.length) * 100) : 0;
+    return {
+      ...r,
+      total:     ri.length,
+      bought:    bought.length,
+      want:      want.length,
+      highPrio:  highPrio.length,
+      totalVal,
+      spentVal,
+      pendVal:   totalVal - spentVal,
+      pct,
+    };
+  }), [rooms, activeItems]);
+
+  const RoomsSimple = () => {
+    // Totais globais para o header
+    const totalItems = roomStats.reduce((s,r)=>s+r.total,0);
+    const totalHigh  = roomStats.reduce((s,r)=>s+r.highPrio,0);
+    const totalVal   = roomStats.reduce((s,r)=>s+r.totalVal,0);
+
+    return (
+      <div style={{display:"flex",flexDirection:"column",gap:22}}>
+        {/* Header */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
+          <div>
+            <h1 className="fd" style={{fontSize:27,fontWeight:600}}>Cômodos</h1>
+            <p style={{color:"var(--tx2)",fontSize:13,marginTop:2}}>
+              {rooms.length} cômodos · {totalItems} itens · {fmt(totalVal)}
+            </p>
           </div>
-        );})}
+          <button className="btn btn-p" onClick={()=>setRoomModal(true)}><Plus size={13}/>Novo cômodo</button>
+        </div>
+
+        {/* Summary bar */}
+        {totalHigh > 0 && (
+          <div style={{background:"var(--ra)",border:"1px solid rgba(217,79,92,.25)",borderRadius:10,
+            padding:"10px 16px",display:"flex",alignItems:"center",gap:8,fontSize:13}}>
+            <Flame size={14} style={{color:"var(--r)",flexShrink:0}}/>
+            <span style={{color:"var(--r)",fontWeight:600}}>
+              {totalHigh} item{totalHigh>1?"s":""} de alta prioridade pendente{totalHigh>1?"s":""}
+            </span>
+          </div>
+        )}
+
+        {/* Room cards grid */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
+          {roomStats.map(r => {
+            const Icon       = getIcon(r.icon);
+            const isDefault  = ["quarto","sala","cozinha","banheiro"].includes(r.id);
+            const hasItems   = r.total > 0;
+
+            return (
+              <div key={r.id} className="card clift au" style={{padding:"20px 22px",display:"flex",flexDirection:"column",gap:0}}>
+
+                {/* Card header: icon + name + delete */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                  <div style={{display:"flex",alignItems:"center",gap:11}}>
+                    <div style={{width:44,height:44,borderRadius:13,background:`${r.color}18`,
+                      display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      <Icon size={22} style={{color:r.color}}/>
+                    </div>
+                    <div>
+                      <h3 style={{fontWeight:700,fontSize:15,lineHeight:1.2}}>{r.name}</h3>
+                      <p style={{fontSize:11.5,color:"var(--tx3)",marginTop:2}}>
+                        {r.total} {r.total===1?"item":"itens"}
+                      </p>
+                    </div>
+                  </div>
+                  {!isDefault && <DeleteButton onConfirm={()=>handleDeleteRoom(r.id)}/>}
+                </div>
+
+                {hasItems ? (
+                  <>
+                    {/* Progress bar */}
+                    <div style={{marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",fontSize:11.5,color:"var(--tx3)",marginBottom:5}}>
+                        <span>{r.bought} comprado{r.bought!==1?"s":""}</span>
+                        <span style={{fontWeight:700,color:r.color}}>{r.pct}%</span>
+                      </div>
+                      <div className="ptr">
+                        <div className="pfl" style={{width:`${r.pct}%`,background:r.color}}/>
+                      </div>
+                    </div>
+
+                    {/* Stats grid: 3 columns */}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                      {/* Pendentes */}
+                      <div style={{background:"var(--bg3)",borderRadius:9,padding:"9px 10px",textAlign:"center"}}>
+                        <p style={{fontSize:18,fontWeight:800,color:"var(--go)",lineHeight:1}}>{r.want}</p>
+                        <p style={{fontSize:9.5,color:"var(--tx3)",textTransform:"uppercase",
+                          letterSpacing:".06em",marginTop:3,fontWeight:600}}>Pendentes</p>
+                      </div>
+
+                      {/* Alta prioridade */}
+                      <div style={{background: r.highPrio > 0 ? "var(--ra)" : "var(--bg3)",
+                        borderRadius:9,padding:"9px 10px",textAlign:"center",
+                        border: r.highPrio > 0 ? "1px solid rgba(217,79,92,.2)" : "none"}}>
+                        <p style={{fontSize:18,fontWeight:800,
+                          color:r.highPrio>0?"var(--r)":"var(--tx3)",lineHeight:1}}>
+                          {r.highPrio}
+                        </p>
+                        <p style={{fontSize:9.5,textTransform:"uppercase",letterSpacing:".06em",
+                          marginTop:3,fontWeight:600,
+                          color:r.highPrio>0?"var(--r)":"var(--tx3)"}}>
+                          {r.highPrio > 0 ? "⚡ Urgentes" : "Urgentes"}
+                        </p>
+                      </div>
+
+                      {/* Valor total */}
+                      <div style={{background:"var(--bg3)",borderRadius:9,padding:"9px 10px",textAlign:"center"}}>
+                        <p style={{fontSize:r.totalVal>=1000?13:16,fontWeight:800,
+                          color:"var(--p)",lineHeight:1,marginTop:r.totalVal>=1000?2:0}}>
+                          {fmt(r.totalVal)}
+                        </p>
+                        <p style={{fontSize:9.5,color:"var(--tx3)",textTransform:"uppercase",
+                          letterSpacing:".06em",marginTop:3,fontWeight:600}}>Estimado</p>
+                      </div>
+                    </div>
+
+                    {/* Spent vs pending breakdown (só se tiver preços) */}
+                    {r.spentVal > 0 && (
+                      <div style={{marginTop:10,display:"flex",gap:6}}>
+                        <div style={{flex:1,background:"var(--ga)",borderRadius:7,padding:"6px 8px",textAlign:"center"}}>
+                          <p style={{fontSize:11,fontWeight:700,color:"var(--g)"}}>{fmt(r.spentVal)}</p>
+                          <p style={{fontSize:9,color:"var(--g)",opacity:.8,textTransform:"uppercase",letterSpacing:".05em",marginTop:1}}>Gasto</p>
+                        </div>
+                        <div style={{flex:1,background:"var(--pa)",borderRadius:7,padding:"6px 8px",textAlign:"center"}}>
+                          <p style={{fontSize:11,fontWeight:700,color:"var(--p)"}}>{fmt(r.pendVal)}</p>
+                          <p style={{fontSize:9,color:"var(--p)",opacity:.8,textTransform:"uppercase",letterSpacing:".05em",marginTop:1}}>Pendente</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* CTA — ver itens deste cômodo */}
+                    <button onClick={()=>{dispatchFilter({type:"SET_ROOM",payload:r.id});setView("items");}}
+                      className="btn btn-g"
+                      style={{marginTop:12,width:"100%",justifyContent:"center",
+                        fontSize:12,gap:5,padding:"7px",borderRadius:8,
+                        border:"1px solid var(--bdr)",color:"var(--tx3)"}}>
+                      Ver itens <ArrowRight size={11}/>
+                    </button>
+                  </>
+                ) : (
+                  <div style={{textAlign:"center",padding:"16px 0"}}>
+                    <p style={{fontSize:12.5,color:"var(--tx3)",fontStyle:"italic",marginBottom:10}}>
+                      Nenhum item ainda
+                    </p>
+                    <button onClick={()=>openAdd({prefillRoom:r.id})}
+                      className="btn btn-g"
+                      style={{fontSize:12,gap:5,border:"1.5px dashed var(--bdr2)",borderRadius:8,padding:"7px 14px"}}>
+                      <Plus size={12}/>Adicionar item
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className={dk?"dk":""} style={{display:"flex",minHeight:"100vh",background:"var(--bg)"}}>
