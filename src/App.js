@@ -13,7 +13,9 @@ import {
   Bell, Award, RefreshCw, ChevronDown, ChevronUp, BadgePercent,
   RotateCcw, Trash, LogOut, User, SlidersHorizontal, SortAsc,
   ShoppingCart, Boxes, PiggyBank, ArrowLeft, FileText, TrendingDown,
-  Filter, ArrowUpDown, Eye, BarChart3, PieChart, CalendarCheck
+  Filter, ArrowUpDown, Eye, BarChart3,
+  PieChart as PieChartIcon, // ✅ FIX
+  CalendarCheck
 } from "lucide-react";
 
 // ── Hooks Supabase ───────────────────────────────────────
