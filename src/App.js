@@ -2,7 +2,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, useReducer } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend, CartesianGrid } from "recharts";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  PieChart as RechartsPieChart, Pie, Legend, CartesianGrid,
+} from "recharts";
 import {
   Home, Plus, Trash2, ExternalLink, Check, Search, Moon, Sun,
   Package, ShoppingBag, DollarSign, Clock, X, Edit3, Layers,
@@ -13,7 +16,7 @@ import {
   Bell, Award, RefreshCw, ChevronDown, ChevronUp, BadgePercent,
   RotateCcw, Trash, LogOut, User, SlidersHorizontal, SortAsc,
   ShoppingCart, Boxes, PiggyBank, ArrowLeft, FileText, TrendingDown,
-  Filter, ArrowUpDown, Eye, BarChart3, PieChart, CalendarCheck
+  Filter, ArrowUpDown, BarChart3, CalendarCheck
 } from "lucide-react";
 
 // ── Hooks Supabase ───────────────────────────────────────
@@ -1608,7 +1611,7 @@ function RoomCharts({ items = [], rooms = [] }) {
               Distribuição do valor estimado por cômodo
             </p>
             <ResponsiveContainer width="100%" height={220}>
-              <PieChart>
+              <RechartsPieChart>
                 <Pie data={pieData} cx="50%" cy="50%"
                   innerRadius={55} outerRadius={90}
                   dataKey="value" labelLine={false} label={renderPieLabel}>
@@ -1617,7 +1620,7 @@ function RoomCharts({ items = [], rooms = [] }) {
                   ))}
                 </Pie>
                 <Tooltip content={<PieTooltip/>}/>
-              </PieChart>
+              </RechartsPieChart>
             </ResponsiveContainer>
             {/* Custom legend below chart */}
             <div style={{ display:"flex", flexWrap:"wrap", gap:"6px 14px", justifyContent:"center", marginTop:6 }}>
