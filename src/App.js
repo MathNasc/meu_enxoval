@@ -29,6 +29,75 @@ import HouseholdModal from "./components/HouseholdModal";
 // ════════════════════════════════════════════════════════
 // STYLES (idêntico ao v4 — mantido para brevidade)
 // ════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════
+// ERROR BOUNDARY — catches render crashes and shows a
+// friendly message instead of a blank screen
+// ════════════════════════════════════════════════════════
+import { Component } from "react";
+
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error("[ErrorBoundary]", error, info);
+  }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div style={{
+        minHeight:"100vh", display:"flex", alignItems:"center",
+        justifyContent:"center", flexDirection:"column", gap:16,
+        background:"#F5F0E6", padding:24, textAlign:"center",
+      }}>
+        <div style={{fontSize:40}}>🏠</div>
+        <h2 style={{fontFamily:"sans-serif", fontSize:20, fontWeight:700, color:"#102030"}}>
+          Algo deu errado
+        </h2>
+        <p style={{fontFamily:"sans-serif", fontSize:14, color:"#325870", maxWidth:400, lineHeight:1.6}}>
+          {this.state.error?.message?.includes("API key") ||
+           this.state.error?.message?.includes("apikey")
+            ? "As variáveis de ambiente do Supabase não estão configuradas no Vercel. Veja as instruções abaixo."
+            : "Ocorreu um erro inesperado. Tente recarregar a página."}
+        </p>
+        {(this.state.error?.message?.includes("API key") ||
+          this.state.error?.message?.includes("apikey")) && (
+          <div style={{
+            background:"#fff", border:"1.5px solid #C8B99E",
+            borderRadius:12, padding:"16px 20px", textAlign:"left",
+            fontFamily:"monospace", fontSize:13, maxWidth:480,
+          }}>
+            <p style={{marginBottom:8,fontFamily:"sans-serif",fontWeight:700,fontSize:14}}>
+              Configure no Vercel:
+            </p>
+            <p style={{color:"#555",marginBottom:4}}>Settings → Environment Variables</p>
+            <p style={{background:"#f0f0f0",padding:"6px 10px",borderRadius:6,marginBottom:4}}>
+              NEXT_PUBLIC_SUPABASE_URL = https://xxx.supabase.co
+            </p>
+            <p style={{background:"#f0f0f0",padding:"6px 10px",borderRadius:6}}>
+              NEXT_PUBLIC_SUPABASE_ANON_KEY = eyJ...
+            </p>
+          </div>
+        )}
+        <button
+          onClick={()=>{ this.setState({hasError:false,error:null}); window.location.reload(); }}
+          style={{
+            background:"#1272AA", color:"white", border:"none",
+            borderRadius:9, padding:"10px 22px", fontFamily:"sans-serif",
+            fontWeight:700, fontSize:14, cursor:"pointer",
+          }}>
+          Recarregar
+        </button>
+      </div>
+    );
+  }
+}
+
 const Styles = () => (
   <style>{`
     @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@300;400;500;600;700&display=swap');
@@ -983,7 +1052,7 @@ function filterReducer(state, action) {
   }
 }
 
-export default function App() {
+function AppInner() {
   const auth     = useAuth();
   const itemsHook= useItems(auth.householdId);
   const roomsHook= useRooms(auth.householdId);
@@ -1269,12 +1338,12 @@ export default function App() {
         )}
 
         {/* Insights */}
-        {generateInsights().length>0&&(
+        {(()=>{const ins=generateInsights();return ins.length>0&&(
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <h3 className="fd" style={{fontSize:18,fontWeight:600,display:"flex",alignItems:"center",gap:8}}><Lightbulb size={16} style={{color:"var(--go)"}}/>Insights</h3>
-            {generateInsights().map((ins,i)=><InsightCard key={i} type={ins.type} text={ins.text} Icon={ins.Icon} delay={i*.07}/>)}
+            {ins.map((x,i)=><InsightCard key={i} type={x.type} text={x.text} Icon={x.Icon} delay={i*.07}/>)}
           </div>
-        )}
+        );})()}
       </div>
     );
   };
@@ -1810,7 +1879,7 @@ function RoomCharts({ items = [], rooms = [] }) {
   const { search, fRoom, fStatus, fPrio, fStar, fPromo, minPrice, maxPrice, sort, vw, filtersOpen } = filters;
 
   const filtered = useMemo(()=>{
-    let arr = [...activeItems];
+    let arr = [...(activeItems || [])];
     if (search.trim()) arr = arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase())||i.notes?.toLowerCase().includes(search.toLowerCase()));
     if (fRoom   !== "all") arr = arr.filter(i=>i.roomId===fRoom);
     if (fStatus !== "all") arr = arr.filter(i=>i.status===fStatus);
@@ -2148,23 +2217,23 @@ function RoomCharts({ items = [], rooms = [] }) {
   };
 
   // ── Dados agregados por cômodo (derivados de activeItems — sem query extra) ──
-  const roomStats = useMemo(() => rooms.map(r => {
-    const ri       = activeItems.filter(i => i.roomId === r.id);
+  const roomStats = useMemo(() => (rooms || []).map(r => {
+    const ri       = (activeItems || []).filter(i => i?.roomId === r.id);
     const bought   = ri.filter(i => i.status === "bought");
     const want     = ri.filter(i => i.status === "want");
     const highPrio = ri.filter(i => i.priority === "high" && i.status !== "bought");
-    const totalVal = ri.filter(i => i.price).reduce((s,i) => s + parseFloat(i.price||0), 0);
-    const spentVal = bought.filter(i => i.price).reduce((s,i) => s + parseFloat(i.price||0), 0);
+    const totalVal = ri.filter(i => i.price).reduce((s,i) => s + (parseFloat(i.price)||0), 0);
+    const spentVal = bought.filter(i => i.price).reduce((s,i) => s + (parseFloat(i.price)||0), 0);
     const pct      = ri.length > 0 ? Math.round((bought.length / ri.length) * 100) : 0;
     return {
       ...r,
-      total:     ri.length,
-      bought:    bought.length,
-      want:      want.length,
-      highPrio:  highPrio.length,
-      totalVal,
-      spentVal,
-      pendVal:   totalVal - spentVal,
+      total:    ri.length,
+      bought:   bought.length,
+      want:     want.length,
+      highPrio: highPrio.length,
+      totalVal: parseFloat(totalVal.toFixed(2)),
+      spentVal: parseFloat(spentVal.toFixed(2)),
+      pendVal:  parseFloat((totalVal - spentVal).toFixed(2)),
       pct,
     };
   }), [rooms, activeItems]);
@@ -2394,5 +2463,15 @@ function RoomCharts({ items = [], rooms = [] }) {
       {householdModal&&<HouseholdModal auth={auth} onClose={()=>setHouseholdModal(false)}/>}
       {homeModal&&<CompleteHomeModal rooms={rooms} items={activeItems} onAddItems={handleAddItems} onClose={()=>setHomeModal(false)}/>}
     </div>
+  );
+}
+
+// Wrap with ErrorBoundary so crashes show a friendly message
+// instead of a blank Vercel page
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppInner/>
+    </ErrorBoundary>
   );
 }

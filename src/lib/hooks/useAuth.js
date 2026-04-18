@@ -21,9 +21,16 @@ export function useAuth() {
     return data;
   }, []);
 
-  // ── Inicializa sessão ────────────────────────────────────
+  // ── Inicializa sessão (com tratamento de token inválido) ─
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      // Token inválido no Vercel — limpa e deixa o usuário logar de novo
+      if (error?.message?.includes("Refresh Token")) {
+        console.warn("[useAuth] Stale token detected, clearing session");
+        supabase.auth.signOut();
+        setLoading(false);
+        return;
+      }
       setUser(session?.user ?? null);
       if (session?.user) {
         loadProfile(session.user.id).finally(() => setLoading(false));
@@ -33,10 +40,16 @@ export function useAuth() {
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+      (event, session) => {
+        // TOKEN_REFRESH_FAILED = token expirado/inválido, força logout limpo
+        if (event === "TOKEN_REFRESH_FAILED") {
+          console.warn("[useAuth] Token refresh failed, signing out");
+          supabase.auth.signOut();
+          return;
+        }
         setUser(session?.user ?? null);
         if (session?.user) loadProfile(session.user.id);
-        else { setProfile(null); }
+        else setProfile(null);
       }
     );
 
