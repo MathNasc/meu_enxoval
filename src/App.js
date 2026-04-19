@@ -1385,6 +1385,62 @@ function AppInner() {
     );
   };
 
+  // ── Pre-computed derived state (must be before early returns — Rules of Hooks) ──
+  // Desestrutura o estado elevado de filtros
+  const { search, fRoom, fStatus, fPrio, fStar, fPromo, minPrice, maxPrice, sort, vw, filtersOpen } = filters;
+
+  const filtered = useMemo(()=>{
+    let arr = [...(activeItems || [])];
+    if (search.trim()) arr = arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase())||i.notes?.toLowerCase().includes(search.toLowerCase()));
+    if (fRoom   !== "all") arr = arr.filter(i=>i.roomId===fRoom);
+    if (fStatus !== "all") arr = arr.filter(i=>i.status===fStatus);
+    if (fPrio   !== "all") arr = arr.filter(i=>i.priority===fPrio);
+    if (fStar)             arr = arr.filter(i=>i.starred);
+    if (fPromo)            arr = arr.filter(i=>!!getPromoInfo(i));
+    if (minPrice !== "") {
+      const mn = parseFloat(minPrice);
+      if (!isNaN(mn)) arr = arr.filter(i => parseFloat(i.price||0) >= mn);
+    }
+    if (maxPrice !== "") {
+      const mx = parseFloat(maxPrice);
+      if (!isNaN(mx)) arr = arr.filter(i => parseFloat(i.price||0) <= mx);
+    }
+    arr.sort((a,b)=>{
+      if (sort==="name")       return (a.name||"").localeCompare(b.name||"","pt");
+      if (sort==="price_asc")  return (parseFloat(a.price)||0)-(parseFloat(b.price)||0);
+      if (sort==="price_desc") return (parseFloat(b.price)||0)-(parseFloat(a.price)||0);
+      if (sort==="prio")  { const p={high:0,normal:1,low:2}; return (p[a.priority]||1)-(p[b.priority]||1); }
+      if (sort==="recent"){ try{return new Date(b.createdAt||0)-new Date(a.createdAt||0);}catch{return 0;} }
+      return 0;
+    });
+    return arr;
+  },[activeItems,search,fRoom,fStatus,fPrio,fStar,fPromo,minPrice,maxPrice,sort]);
+
+  const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||!!search.trim()||minPrice!==""||maxPrice!=="";
+
+
+  // ── Dados agregados por cômodo (derivados de activeItems — sem query extra) ──
+  const roomStats = useMemo(() => (rooms || []).map(r => {
+    const ri       = (activeItems || []).filter(i => i?.roomId === r.id);
+    const bought   = ri.filter(i => i.status === "bought");
+    const want     = ri.filter(i => i.status === "want");
+    const highPrio = ri.filter(i => i.priority === "high" && i.status !== "bought");
+    const totalVal = ri.filter(i => i.price).reduce((s,i) => s + (parseFloat(i.price)||0), 0);
+    const spentVal = bought.filter(i => i.price).reduce((s,i) => s + (parseFloat(i.price)||0), 0);
+    const pct      = ri.length > 0 ? Math.round((bought.length / ri.length) * 100) : 0;
+    return {
+      ...r,
+      total:    ri.length,
+      bought:   bought.length,
+      want:     want.length,
+      highPrio: highPrio.length,
+      totalVal: parseFloat(totalVal.toFixed(2)),
+      spentVal: parseFloat(spentVal.toFixed(2)),
+      pendVal:  parseFloat((totalVal - spentVal).toFixed(2)),
+      pct,
+    };
+  }), [rooms, activeItems]);
+
   // ── Loading / Auth screens ────────────────────────────────
   if(auth.loading) return (
     <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:14,background:"var(--bg)"}}>
@@ -1878,38 +1934,6 @@ function RoomCharts({ items = [], rooms = [] }) {
     );
   };
 
-  // Desestrutura o estado elevado de filtros
-  const { search, fRoom, fStatus, fPrio, fStar, fPromo, minPrice, maxPrice, sort, vw, filtersOpen } = filters;
-
-  const filtered = useMemo(()=>{
-    let arr = [...(activeItems || [])];
-    if (search.trim()) arr = arr.filter(i=>i.name?.toLowerCase().includes(search.toLowerCase())||i.notes?.toLowerCase().includes(search.toLowerCase()));
-    if (fRoom   !== "all") arr = arr.filter(i=>i.roomId===fRoom);
-    if (fStatus !== "all") arr = arr.filter(i=>i.status===fStatus);
-    if (fPrio   !== "all") arr = arr.filter(i=>i.priority===fPrio);
-    if (fStar)             arr = arr.filter(i=>i.starred);
-    if (fPromo)            arr = arr.filter(i=>!!getPromoInfo(i));
-    if (minPrice !== "") {
-      const mn = parseFloat(minPrice);
-      if (!isNaN(mn)) arr = arr.filter(i => parseFloat(i.price||0) >= mn);
-    }
-    if (maxPrice !== "") {
-      const mx = parseFloat(maxPrice);
-      if (!isNaN(mx)) arr = arr.filter(i => parseFloat(i.price||0) <= mx);
-    }
-    arr.sort((a,b)=>{
-      if (sort==="name")       return (a.name||"").localeCompare(b.name||"","pt");
-      if (sort==="price_asc")  return (parseFloat(a.price)||0)-(parseFloat(b.price)||0);
-      if (sort==="price_desc") return (parseFloat(b.price)||0)-(parseFloat(a.price)||0);
-      if (sort==="prio")  { const p={high:0,normal:1,low:2}; return (p[a.priority]||1)-(p[b.priority]||1); }
-      if (sort==="recent"){ try{return new Date(b.createdAt||0)-new Date(a.createdAt||0);}catch{return 0;} }
-      return 0;
-    });
-    return arr;
-  },[activeItems,search,fRoom,fStatus,fPrio,fStar,fPromo,minPrice,maxPrice,sort]);
-
-  const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||!!search.trim()||minPrice!==""||maxPrice!=="";
-
   const ItemsSimple=()=>{
     const clearFilters = ()=> dispatchFilter({ type:"CLEAR" });
     const suggs = fRoom!=="all" ? getRoomSuggestions(fRoom,rooms,activeItems) : [];
@@ -2218,28 +2242,6 @@ function RoomCharts({ items = [], rooms = [] }) {
       </div>
     );
   };
-
-  // ── Dados agregados por cômodo (derivados de activeItems — sem query extra) ──
-  const roomStats = useMemo(() => (rooms || []).map(r => {
-    const ri       = (activeItems || []).filter(i => i?.roomId === r.id);
-    const bought   = ri.filter(i => i.status === "bought");
-    const want     = ri.filter(i => i.status === "want");
-    const highPrio = ri.filter(i => i.priority === "high" && i.status !== "bought");
-    const totalVal = ri.filter(i => i.price).reduce((s,i) => s + (parseFloat(i.price)||0), 0);
-    const spentVal = bought.filter(i => i.price).reduce((s,i) => s + (parseFloat(i.price)||0), 0);
-    const pct      = ri.length > 0 ? Math.round((bought.length / ri.length) * 100) : 0;
-    return {
-      ...r,
-      total:    ri.length,
-      bought:   bought.length,
-      want:     want.length,
-      highPrio: highPrio.length,
-      totalVal: parseFloat(totalVal.toFixed(2)),
-      spentVal: parseFloat(spentVal.toFixed(2)),
-      pendVal:  parseFloat((totalVal - spentVal).toFixed(2)),
-      pct,
-    };
-  }), [rooms, activeItems]);
 
   const RoomsSimple = () => {
     // Totais globais para o header
