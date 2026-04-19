@@ -1385,6 +1385,22 @@ function AppInner() {
     );
   };
 
+  // ── Derived from hooks (must be before useMemo deps and early returns) ──
+  const {items,loading:itemsLoading}=itemsHook;
+  const {rooms}=roomsHook;
+  const {settings,saveSettings}=settingsHook;
+  const activeItems  = items.filter(isActive);
+  const deletedItems = items.filter(isDeleted);
+
+  const navItems=[
+    {id:"dashboard",label:"Dashboard",  icon:LayoutDashboard,count:null},
+    {id:"items",    label:"Meus Itens", icon:ShoppingBag,    count:activeItems.length},
+    {id:"rooms",    label:"Cômodos",    icon:Home,           count:rooms.length},
+    {id:"summary",  label:"Resumo",     icon:FileText,       count:null},
+    {id:"trash",    label:"Lixeira",    icon:Trash,          count:deletedItems.length,danger:true},
+  ];
+  const pending      = activeItems.filter(i=>i.status!=="bought").length;
+
   // ── Pre-computed derived state (must be before early returns — Rules of Hooks) ──
   // Desestrutura o estado elevado de filtros
   const { search, fRoom, fStatus, fPrio, fStar, fPromo, minPrice, maxPrice, sort, vw, filtersOpen } = filters;
@@ -1458,21 +1474,7 @@ function AppInner() {
       loading={auth.loading} error={auth.error} setError={auth.setError}/></>
   );
 
-  const {items,loading:itemsLoading}=itemsHook;
-  const {rooms}=roomsHook;
-  const {settings,saveSettings}=settingsHook;
 
-  const activeItems  = items.filter(isActive);
-  const deletedItems = items.filter(isDeleted);
-  const pending      = activeItems.filter(i=>i.status!=="bought").length;
-
-  const navItems=[
-    {id:"dashboard",label:"Dashboard",  icon:LayoutDashboard,count:null},
-    {id:"items",    label:"Meus Itens", icon:ShoppingBag,    count:activeItems.length},
-    {id:"rooms",    label:"Cômodos",    icon:Home,           count:rooms.length},
-    {id:"summary",  label:"Resumo",     icon:FileText,       count:null},
-    {id:"trash",    label:"Lixeira",    icon:Trash,          count:deletedItems.length,danger:true},
-  ];
 
   // ── Conteúdo simplificado (Dashboard e Items)  ────────────
 
