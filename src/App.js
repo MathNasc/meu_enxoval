@@ -1,7 +1,7 @@
 // src/App.js — versão com Supabase Auth + banco de dados
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef, useReducer } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useReducer, Component } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart as RechartsPieChart, Pie, Legend, CartesianGrid,
@@ -37,7 +37,6 @@ import HouseholdModal from "./components/HouseholdModal";
 // ERROR BOUNDARY — catches render crashes and shows a
 // friendly message instead of a blank screen
 // ════════════════════════════════════════════════════════
-import { Component } from "react";
 
 class ErrorBoundary extends Component {
   constructor(props) {
@@ -1160,6 +1159,41 @@ function AppInner() {
 
 
   // ── Summary View ─────────────────────────────────────
+  // generateInsights — analisa items e gera alertas úteis
+  // ─────────────────────────────────────────────────────
+  const generateInsights = () => {
+    const insights = [];
+    if (!activeItems.length) return insights;
+
+    const highPrio  = activeItems.filter(i => i.priority === "high" && i.status !== "bought");
+    const promoList = activeItems.filter(i => getPromoInfo(i) && i.status !== "bought");
+    const bought    = activeItems.filter(i => i.status === "bought");
+    const pct       = activeItems.length > 0 ? Math.round((bought.length / activeItems.length) * 100) : 0;
+
+    if (highPrio.length > 0)
+      insights.push({ type:"alert", text:`${highPrio.length} item${highPrio.length>1?"s":""} de alta prioridade ainda pendente${highPrio.length>1?"s":""}`, Icon:Flame });
+    if (promoList.length > 0)
+      insights.push({ type:"warn", text:`🔥 ${promoList.length} item${promoList.length>1?"s em promoção":" em promoção"}! Aproveite antes de acabar`, Icon:BadgePercent });
+    if (pct >= 75 && pct < 100)
+      insights.push({ type:"ok", text:`Quase lá! ${pct}% do enxoval já comprado 🎉`, Icon:Award });
+    if (pct === 100 && activeItems.length > 0)
+      insights.push({ type:"ok", text:`Enxoval 100% completo! Parabéns! 🏠✨`, Icon:CheckCircle2 });
+
+    const emptyRooms = rooms.filter(r => !activeItems.some(i => i.roomId === r.id));
+    if (emptyRooms.length > 0)
+      insights.push({ type:"info", text:`${emptyRooms.length} cômodo${emptyRooms.length>1?"s":""} sem itens: ${emptyRooms.map(r=>r.name).join(", ")}`, Icon:Home });
+
+    const allVal   = activeItems.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
+    const budget   = parseFloat(settings.budgetTotal||0);
+    if (budget > 0 && allVal > budget)
+      insights.push({ type:"alert", text:`Estimativa (${fmt(allVal)}) ultrapassa o orçamento (${fmt(budget)}) em ${fmt(allVal-budget)}`, Icon:TrendingDown });
+    else if (budget > 0 && allVal <= budget)
+      insights.push({ type:"ok", text:`Dentro do orçamento! Restam ${fmt(budget-allVal)} disponíveis`, Icon:Wallet });
+
+    return insights.slice(0, 5);
+  };
+
+
   const SummaryView = () => {
     const total     = activeItems.length;
     const bought    = activeItems.filter(i=>i.status==="bought").length;
@@ -1640,40 +1674,6 @@ function RoomCharts({ items = [], rooms = [] }) {
 }
 
   // ─────────────────────────────────────────────────────
-  // generateInsights — analisa items e gera alertas úteis
-  // ─────────────────────────────────────────────────────
-  const generateInsights = () => {
-    const insights = [];
-    if (!activeItems.length) return insights;
-
-    const highPrio  = activeItems.filter(i => i.priority === "high" && i.status !== "bought");
-    const promoList = activeItems.filter(i => getPromoInfo(i) && i.status !== "bought");
-    const bought    = activeItems.filter(i => i.status === "bought");
-    const pct       = activeItems.length > 0 ? Math.round((bought.length / activeItems.length) * 100) : 0;
-
-    if (highPrio.length > 0)
-      insights.push({ type:"alert", text:`${highPrio.length} item${highPrio.length>1?"s":""} de alta prioridade ainda pendente${highPrio.length>1?"s":""}`, Icon:Flame });
-    if (promoList.length > 0)
-      insights.push({ type:"warn", text:`🔥 ${promoList.length} item${promoList.length>1?"s em promoção":" em promoção"}! Aproveite antes de acabar`, Icon:BadgePercent });
-    if (pct >= 75 && pct < 100)
-      insights.push({ type:"ok", text:`Quase lá! ${pct}% do enxoval já comprado 🎉`, Icon:Award });
-    if (pct === 100 && activeItems.length > 0)
-      insights.push({ type:"ok", text:`Enxoval 100% completo! Parabéns! 🏠✨`, Icon:CheckCircle2 });
-
-    const emptyRooms = rooms.filter(r => !activeItems.some(i => i.roomId === r.id));
-    if (emptyRooms.length > 0)
-      insights.push({ type:"info", text:`${emptyRooms.length} cômodo${emptyRooms.length>1?"s":""} sem itens: ${emptyRooms.map(r=>r.name).join(", ")}`, Icon:Home });
-
-    const allVal   = activeItems.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
-    const budget   = parseFloat(settings.budgetTotal||0);
-    if (budget > 0 && allVal > budget)
-      insights.push({ type:"alert", text:`Estimativa (${fmt(allVal)}) ultrapassa o orçamento (${fmt(budget)}) em ${fmt(allVal-budget)}`, Icon:TrendingDown });
-    else if (budget > 0 && allVal <= budget)
-      insights.push({ type:"ok", text:`Dentro do orçamento! Restam ${fmt(budget-allVal)} disponíveis`, Icon:Wallet });
-
-    return insights.slice(0, 5);
-  };
-
   const DashboardSimple=()=>{
     const total    = activeItems.length;
     const bought   = activeItems.filter(i=>i.status==="bought").length;
