@@ -1,12 +1,13 @@
-// app/api/extract-product/route.js
-//
-// FIX #1: Nome retornava domínio em vez do produto
-// CAUSA:  Shopee/ML são SPAs — HTML chega sem conteúdo renderizado.
-//         O fallback retornava null; o frontend exibia o hostname da URL.
-// SOLUÇÃO:
-//   - Mercado Livre: usa API oficial gratuita (api.mercadolibre.com)
-//   - Shopee:        tenta a API móvel informal + JSON-LD
-//   - Outros:        Open Graph + JSON-LD + seletores CSS + title tag
+/**
+ * POST /api/extract-product
+ * Body: { url: string }
+ *
+ * Extrai nome, preço e imagem de e-commerces brasileiros.
+ * Estratégias por loja:
+ *   - Mercado Livre → API oficial + fallback scraping OG
+ *   - Shopee        → API mobile + fallback OG
+ *   - Demais        → JSON-LD + Open Graph + seletores CSS
+ */
 
 import axios from "axios";
 import * as cheerio from "cheerio";
@@ -27,100 +28,177 @@ const webHeaders = (url) => ({
   "Accept-Encoding":           "gzip, deflate, br",
   "Cache-Control":             "no-cache",
   "Pragma":                    "no-cache",
-  "Referer":                   new URL(url).origin,
+  "Referer":                   (() => { try { return new URL(url).origin; } catch { return ""; } })(),
   "sec-fetch-dest":            "document",
   "sec-fetch-mode":            "navigate",
   "sec-fetch-site":            "none",
   "upgrade-insecure-requests": "1",
 });
 
+// ── Site name patterns — strings que NÃO são nomes de produto ──
+const SITE_NAME_PATTERNS = [
+  /^mercado\s*li(vre|bre)(\s*-|\s*:|$)/i,
+  /^shopee(\s*-|\s*:|$)/i,
+  /^amazon(\s*-|\s*:|$)/i,
+  /^magalu(\s*-|\s*:|$)/i,
+  /^magazine\s*luiza(\s*-|\s*:|$)/i,
+  /^casas\s*bahia(\s*-|\s*:|$)/i,
+  /^americanas(\s*-|\s*:|$)/i,
+  /^submarino(\s*-|\s*:|$)/i,
+  /^leroy\s*merlin(\s*-|\s*:|$)/i,
+  /^tok\s*[&e]?\s*stok(\s*-|\s*:|$)/i,
+  /^extra\s*-/i,
+];
+
+const EXACT_SITE_NAMES = new Set([
+  "mercado livre", "mercado libre", "mercadolivre", "mercadolibre",
+  "shopee", "amazon", "magalu", "magazine luiza", "casas bahia",
+  "americanas", "submarino", "leroy merlin", "tok stok", "tok&stok",
+  "extra",
+]);
+
+function isSiteName(name) {
+  if (!name) return true;
+  const n = name.toLowerCase().trim();
+  if (EXACT_SITE_NAMES.has(n)) return true;
+  if (SITE_NAME_PATTERNS.some(p => p.test(n))) return true;
+  // Very short strings are likely not product names
+  if (n.length < 4) return true;
+  return false;
+}
+
+// Strip common site name prefixes from og:title
+// e.g. "Mercado Livre: Sofá 3 lugares" → "Sofá 3 lugares"
+function stripSitePrefix(name) {
+  if (!name) return name;
+  return name
+    .replace(/^mercado\s*li(vre|bre)\s*[:\-–]\s*/i, "")
+    .replace(/^shopee\s*[:\-–]\s*/i, "")
+    .replace(/^amazon\s*[:\-–]\s*/i, "")
+    .replace(/^magalu\s*[:\-–]\s*/i, "")
+    .replace(/^magazine\s*luiza\s*[:\-–]\s*/i, "")
+    .replace(/^casas\s*bahia\s*[:\-–]\s*/i, "")
+    .replace(/^americanas\s*[:\-–]\s*/i, "")
+    .replace(/\s*\|\s*Mercado Livre.*$/i, "")
+    .replace(/\s*\|\s*Shopee.*$/i, "")
+    .replace(/\s*[-|–]\s*(Amazon|Shopee|Magalu|Americanas|Casas Bahia|Mercado Livre).*$/i, "")
+    .trim();
+}
+
 // ═══════════════════════════════════════════════════════
-// MERCADO LIVRE — API oficial gratuita
-// URL formato: https://www.mercadolivre.com.br/xxx-MLB{id}/p/{pid}
-//              ou https://produto.mercadolivre.com.br/MLB-{id}-...
+// MERCADO LIVRE — API oficial (gratuita, sem key)
 // ═══════════════════════════════════════════════════════
 async function extractMercadoLivre(url) {
-  // Extrai o ID do item (MLB-XXXXXXX ou MLBXXXXXXX)
-  const match = url.match(/MLB[-_]?(\d{7,12})/i);
-  if (!match) return null;
+  // Extrai MLB ID em múltiplos formatos de URL
+  const idPatterns = [
+    /\/p\/(MLB\d{7,12})/i,              // /p/MLB123456789 (catalog page)
+    /[\/_-](MLB\d{7,12})(?:[_\-/?#]|$)/i, // -MLB123 ou _MLB123
+    /MLB[-_]?(\d{7,12})/i,             // MLB-123 ou MLB123 (captures digits only)
+  ];
 
-  const itemId = `MLB${match[1]}`;
-  const apiUrl = `https://api.mercadolibre.com/items/${itemId}`;
+  let itemId = null;
+  for (const pat of idPatterns) {
+    const m = url.match(pat);
+    if (m) {
+      const raw = m[1];
+      itemId = raw.toUpperCase().startsWith("MLB") ? raw.toUpperCase() : `MLB${raw}`;
+      break;
+    }
+  }
+
+  if (!itemId) {
+    console.warn("[ML] No item ID in URL:", url.slice(-80));
+    return null;
+  }
+
+  console.log("[ML] Fetching item:", itemId);
 
   try {
-    const { data } = await axios.get(apiUrl, {
-      timeout: 8_000,
-      headers: { "Accept": "application/json" },
-    });
+    const { data } = await axios.get(
+      `https://api.mercadolibre.com/items/${itemId}`,
+      {
+        timeout: 10_000,
+        headers: { "Accept": "application/json", "User-Agent": rUA() },
+      }
+    );
 
-    if (!data?.title) return null;
+    if (!data?.title) {
+      console.warn("[ML] API returned no title for", itemId);
+      return null;
+    }
+
+    const cleanTitle = stripSitePrefix(data.title);
+    if (!cleanTitle || isSiteName(cleanTitle)) {
+      console.warn("[ML] Title is site name:", data.title);
+      return null;
+    }
+
+    const imageUrl =
+      (data.pictures?.[0]?.url || data.thumbnail || "")
+        .replace(/-I\.(jpg|webp)/i, "-O.$1") || null;
 
     return {
-      name:     data.title,
-      price:    data.price ? String(data.price) : null,
-      imageUrl: data.thumbnail?.replace("I.jpg", "O.jpg") || data.thumbnail || null,
-      brand:    data.attributes?.find(a => a.id === "BRAND")?.value_name || null,
-      suggestedRoom: guessRoom(data.title),
+      name:          cleanTitle,
+      price:         data.price ? String(data.price) : null,
+      imageUrl:      imageUrl || null,
+      brand:         data.attributes?.find(a => a.id === "BRAND")?.value_name || null,
+      suggestedRoom: guessRoom(cleanTitle),
     };
   } catch (err) {
-    console.warn("[extract-product] ML API:", err.message);
+    const status = err.response?.status;
+    console.warn("[ML] API error:", status, err.message);
+    // 404 = item não existe com esse ID, tenta fallback
     return null;
   }
 }
 
 // ═══════════════════════════════════════════════════════
-// SHOPEE — API informal via URL de produto
-// URL formato: https://shopee.com.br/nome-i.{shopid}.{itemid}
+// SHOPEE — API mobile informal
 // ═══════════════════════════════════════════════════════
 async function extractShopee(url) {
-  // Extrai shopid e itemid da URL
   const match = url.match(/i\.(\d+)\.(\d+)/);
   if (!match) return null;
 
-  const shopId = match[1];
-  const itemId = match[2];
-
-  // API mobile da Shopee (sem autenticação necessária)
-  const apiUrl = `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`;
-
   try {
-    const { data } = await axios.get(apiUrl, {
-      timeout: 8_000,
-      headers: {
-        "User-Agent":     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-        "Accept":         "application/json",
-        "Referer":        "https://shopee.com.br/",
-        "x-api-source":   "pc",
-      },
-      httpsAgent,
-    });
+    const { data } = await axios.get(
+      `https://shopee.com.br/api/v4/item/get?itemid=${match[2]}&shopid=${match[1]}`,
+      {
+        timeout: 10_000,
+        headers: {
+          "User-Agent":   "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+          "Accept":       "application/json",
+          "Referer":      "https://shopee.com.br/",
+          "x-api-source": "pc",
+        },
+        httpsAgent,
+      }
+    );
 
     const item = data?.data?.item;
-    if (!item) return null;
+    if (!item?.name) return null;
 
-    const price = item.price ? item.price / 100000 : // Shopee usa centavos × 1000
-                  item.price_min ? item.price_min / 100000 : null;
+    const cleanName = stripSitePrefix(item.name);
+    if (!cleanName || isSiteName(cleanName)) return null;
 
-    const imageId = item.image || item.images?.[0];
-    const imageUrl = imageId
-      ? `https://cf.shopee.com.br/file/${imageId}`
-      : null;
+    const price    = item.price     ? item.price / 100000 :
+                     item.price_min ? item.price_min / 100000 : null;
+    const imageId  = item.image || item.images?.[0];
 
     return {
-      name:     item.name || null,
-      price:    price ? String(price.toFixed(2)) : null,
-      imageUrl,
-      brand:    item.brand || null,
-      suggestedRoom: guessRoom(item.name),
+      name:          cleanName,
+      price:         price ? String(price.toFixed(2)) : null,
+      imageUrl:      imageId ? `https://cf.shopee.com.br/file/${imageId}` : null,
+      brand:         item.brand || null,
+      suggestedRoom: guessRoom(cleanName),
     };
   } catch (err) {
-    console.warn("[extract-product] Shopee API:", err.message);
+    console.warn("[Shopee] API error:", err.message);
     return null;
   }
 }
 
 // ═══════════════════════════════════════════════════════
-// EXTRAÇÃO GENÉRICA — Open Graph + JSON-LD + CSS selectors
+// GENÉRICO — JSON-LD + Open Graph + seletores CSS
 // ═══════════════════════════════════════════════════════
 const STORE_SELECTORS = {
   "amazon.com.br": {
@@ -176,21 +254,20 @@ function getOG($) {
   };
 }
 
-// Extrai dados do JSON-LD (schema.org Product)
 function getJsonLd($) {
   let result = null;
   $('script[type="application/ld+json"]').each((_, el) => {
     if (result) return;
     try {
-      const json = JSON.parse($(el).html() || "{}");
+      const json  = JSON.parse($(el).html() || "{}");
       const items = Array.isArray(json) ? json : [json];
       for (const item of items) {
-        if (item["@type"] === "Product") {
+        if (item["@type"] === "Product" && item.name) {
           const offer = item.offers?.price || item.offers?.[0]?.price;
           result = {
-            name:     item.name     || null,
-            price:    offer         ? String(offer) : null,
-            imageUrl: item.image    || (Array.isArray(item.image) ? item.image[0] : null),
+            name:     item.name,
+            price:    offer ? String(offer) : null,
+            imageUrl: Array.isArray(item.image) ? item.image[0] : item.image || null,
             brand:    item.brand?.name || null,
           };
           return;
@@ -208,7 +285,7 @@ function getText($, sels) {
       if (v?.trim()) return v.trim();
     }
     const t = $(s).first().text().replace(/\s+/g, " ").trim();
-    if (t?.length > 2) return t;
+    if (t?.length > 3) return t;
   }
   return null;
 }
@@ -233,10 +310,8 @@ function parsePrice(str) {
 }
 
 function extractPrice($, storeSels) {
-  const all = [
-    ...(storeSels || []),
-    '[class*="price"]', '[class*="preco"]', '[class*="valor"]', ".price",
-  ];
+  const all = [...(storeSels || []),
+    '[class*="price"]', '[class*="preco"]', '[class*="valor"]', ".price"];
   for (const s of all) {
     if (s.startsWith("meta")) {
       const n = parsePrice($(s).attr("content"));
@@ -260,31 +335,39 @@ async function extractGeneric(url) {
   let html;
   try {
     const { data } = await axios.get(url, {
-      headers: webHeaders(url),
-      timeout: 12_000,
+      headers:      webHeaders(url),
+      timeout:      12_000,
       maxRedirects: 5,
       httpsAgent,
       responseType: "text",
-      decompress: true,
+      decompress:   true,
     });
     html = data;
   } catch (err) {
-    console.warn("[extract-product] fetch:", err.message);
+    console.warn("[Generic] fetch error:", err.message);
     return null;
   }
 
-  const $ = cheerio.load(html);
+  const $   = cheerio.load(html);
   const cfg = getStoreConfig(url);
   const og  = getOG($);
   const ld  = getJsonLd($);
 
-  // Nome: JSON-LD > store selectors > OG > h1 > title
+  // Strip site prefixes from og:title before using it
+  const ogNameClean = stripSitePrefix(og.name || "");
+
   const rawName =
-    ld?.name ||
-    (cfg?.name ? getText($, cfg.name) : null) ||
-    og.name ||
-    $("h1").first().text().trim() ||
-    $("title").text().replace(/\s*[-|–|·].*$/, "").trim() ||
+    (ld?.name   ? stripSitePrefix(ld.name)     : null) ||
+    (cfg?.name  ? getText($, cfg.name)          : null) ||
+    (ogNameClean && ogNameClean.length > 3 ? ogNameClean : null) ||
+    (() => {
+      const h1 = $("h1").first().text().trim();
+      return h1?.length > 3 ? stripSitePrefix(h1) : null;
+    })() ||
+    (() => {
+      const t = $("title").text().replace(/\s*[-|–|·|—].*$/, "").trim();
+      return t?.length > 3 ? stripSitePrefix(t) : null;
+    })() ||
     null;
 
   const price =
@@ -299,28 +382,21 @@ async function extractGeneric(url) {
     og.imageUrl ||
     null;
 
-  const brand =
-    ld?.brand ||
-    $('meta[property="og:brand"]').attr("content") ||
-    $('[itemprop="brand"] [itemprop="name"]').first().text().trim() ||
-    null;
-
-  // Limpa sufixos de loja do título
-  const name = rawName
-    ?.replace(/\s*[-|–|·]\s*.*(Amazon|Mercado|Shopee|Magalu|Americanas|Casas Bahia|Leroy|Tok).*$/i, "")
-    .trim()
-    .slice(0, 200) || null;
-
-  return { name, price: price ? String(price) : null, imageUrl, brand };
+  return {
+    name:     rawName,
+    price:    price ? String(price) : null,
+    imageUrl: imageUrl || null,
+    brand:    ld?.brand || $('meta[property="og:brand"]').attr("content") || null,
+  };
 }
 
 // ═══════════════════════════════════════════════════════
-// DETECÇÃO DE CÔMODO
+// Detecta cômodo pelo nome do produto
 // ═══════════════════════════════════════════════════════
 function guessRoom(name) {
   if (!name) return "outro";
   const n = name.toLowerCase();
-  if (/sofá|sofa|rack|tapete|poltrona|luminária|quadro|aparador|tv\b|televisão|home theater/.test(n)) return "sala";
+  if (/sofá|sofa|rack|tapete|poltrona|luminária|quadro|aparador|tv\b|televisão/.test(n)) return "sala";
   if (/cama|colchão|cabeceira|guarda.roupa|cômoda|criado.mudo|travesseiro|edredom|lençol/.test(n)) return "quarto";
   if (/panela|frigideira|geladeira|fogão|micro.ondas|liquidificador|batedeira|airfryer|prato|talher|copo|tábua/.test(n)) return "cozinha";
   if (/toalha|saboneteira|box|vaso sanitário|cuba|torneira|espelho.*banh/.test(n)) return "banheiro";
@@ -339,42 +415,47 @@ export async function POST(req) {
     return Response.json({ error: "URL inválida" }, { status: 400 });
 
   const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } })();
-
   let result = null;
 
-  // ── Estratégias específicas por loja ──────────────────
-  if (host.includes("mercadolivre.com.br") || host.includes("mercadopago.com.br")) {
+  // 1. Estratégias específicas por loja
+  if (host.includes("mercadolivre.com.br") || host.includes("mercadolibre.com")) {
     result = await extractMercadoLivre(url);
   } else if (host.includes("shopee.com.br")) {
     result = await extractShopee(url);
   }
 
-  // ── Fallback genérico para todas as lojas ─────────────
-  if (!result?.name) {
+  // 2. Fallback genérico (OG + JSON-LD + CSS)
+  if (!result?.name || isSiteName(result.name)) {
+    console.log("[extract-product] Trying generic fallback for:", host);
     const generic = await extractGeneric(url);
-    if (generic?.name) {
+    if (generic?.name && !isSiteName(generic.name)) {
       result = { ...result, ...generic };
     }
   }
 
-  // ── Fallback final: pelo menos retorna o hostname formatado ──
-  // Antes retornava null e o frontend mostrava o domínio.
-  // Agora retornamos null explícito e o frontend exibe erro claro.
-  if (!result?.name) {
-    console.warn("[extract-product] No data extracted from:", url);
+  // 3. Nada encontrado — retorna aviso para preenchimento manual
+  if (!result?.name || isSiteName(result.name)) {
+    console.warn("[extract-product] No product data from:", host);
     return Response.json({
-      name:         null,
-      price:        null,
-      imageUrl:     null,
-      brand:        null,
+      name: null, price: null, imageUrl: null, brand: null,
       suggestedRoom: "outro",
-      warning:      "Não consegui extrair os dados automaticamente. Preencha manualmente.",
+      warning: "Não consegui extrair os dados automaticamente. Preencha o nome manualmente.",
     });
   }
 
-  const name = result.name?.replace(
-    /\s*[-|–|·]\s*.*(Amazon|Mercado|Shopee|Magalu|Americanas|Casas Bahia).*$/i, ""
-  ).trim().slice(0, 200);
+  // Limpeza final do nome
+  const name = stripSitePrefix(result.name)
+    ?.replace(/\s*\|\s*.*$/, "")
+    ?.trim()
+    ?.slice(0, 200) || null;
+
+  if (!name || isSiteName(name)) {
+    return Response.json({
+      name: null, price: null, imageUrl: null, brand: null,
+      suggestedRoom: "outro",
+      warning: "Não consegui extrair o nome do produto. Preencha manualmente.",
+    });
+  }
 
   console.log("[extract-product] OK:", { name, price: result.price, image: !!result.imageUrl });
 
