@@ -257,48 +257,160 @@ function extractNameFromMLUrl(url) {
 }
 
 // ════════════════════════════════════════════════════════
-// SHOPEE — API mobile
+// SHOPEE — 3 estratégias em cascata
+// A API mobile bloqueia requests sem cookie de sessão.
 // ════════════════════════════════════════════════════════
 async function extractShopee(url) {
+
+  // ── Estratégia 1: API mobile com múltiplos headers ──
   const match = url.match(/i\.(\d+)\.(\d+)/);
-  if (!match) return null;
+  if (match) {
+    const shopId = match[1];
+    const itemId = match[2];
 
-  try {
-    const { data } = await axios.get(
-      `https://shopee.com.br/api/v4/item/get?itemid=${match[2]}&shopid=${match[1]}`,
+    // Tenta variantes de endpoint da API Shopee
+    const endpoints = [
+      `https://shopee.com.br/api/v4/item/get?itemid=${itemId}&shopid=${shopId}`,
+      `https://shopee.com.br/api/v2/item/get?itemid=${itemId}&shopid=${shopId}`,
+    ];
+
+    const mobileHeaders = [
+      // iOS Safari
       {
-        timeout: 10_000,
-        headers: {
-          "User-Agent":   "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
-          "Accept":       "application/json",
-          "Referer":      "https://shopee.com.br/",
-          "x-api-source": "pc",
-        },
-        httpsAgent,
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "Accept": "application/json",
+        "Referer": "https://shopee.com.br/",
+        "x-api-source": "rn",
+        "af-ac-enc-dat": "null",
+        "shopee_http_dns_mode": "0",
+      },
+      // Android Chrome
+      {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://shopee.com.br/",
+        "x-api-source": "pc",
+      },
+    ];
+
+    for (const endpoint of endpoints) {
+      for (const headers of mobileHeaders) {
+        try {
+          const { data } = await axios.get(endpoint, {
+            timeout: 8_000,
+            headers,
+            httpsAgent,
+          });
+          const item = data?.data?.item;
+          if (!item?.name) continue;
+          const name = cleanName(item.name);
+          if (!name) continue;
+          const price   = item.price     ? item.price / 100000 :
+                          item.price_min ? item.price_min / 100000 : null;
+          const imageId = item.image || item.images?.[0];
+          console.log("[Shopee] API OK:", name);
+          return {
+            name,
+            price:    price ? String(price.toFixed(2)) : null,
+            imageUrl: imageId ? `https://cf.shopee.com.br/file/${imageId}` : null,
+            brand:    item.brand || null,
+            suggestedRoom: guessRoom(name),
+          };
+        } catch (e) {
+          // Try next combination
+        }
       }
-    );
-
-    const item = data?.data?.item;
-    if (!item?.name) return null;
-
-    const name = cleanName(item.name);
-    if (!name) return null;
-
-    const price   = item.price     ? item.price / 100000 :
-                    item.price_min ? item.price_min / 100000 : null;
-    const imageId = item.image || item.images?.[0];
-
-    return {
-      name,
-      price:         price ? String(price.toFixed(2)) : null,
-      imageUrl:      imageId ? `https://cf.shopee.com.br/file/${imageId}` : null,
-      brand:         item.brand || null,
-      suggestedRoom: guessRoom(name),
-    };
-  } catch (err) {
-    console.warn("[Shopee] API error:", err.message);
-    return null;
+    }
   }
+
+  // ── Estratégia 2: Scraping da página com OG + JSON-LD ──
+  // Shopee expõe dados em meta tags para bots de redes sociais
+  try {
+    const { data: html } = await axios.get(url, {
+      timeout: 12_000,
+      headers: {
+        // Googlebot tem acesso especial às meta tags da Shopee
+        "User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "pt-BR,pt;q=0.9",
+        "Cache-Control": "no-cache",
+      },
+      httpsAgent,
+      maxRedirects: 5,
+      responseType: "text",
+      decompress: true,
+    });
+
+    const $ = cheerio.load(html);
+
+    // JSON-LD (mais confiável)
+    let ldResult = null;
+    $('script[type="application/ld+json"]').each((_, el) => {
+      if (ldResult) return;
+      try {
+        const items = [].concat(JSON.parse($(el).html() || "{}"));
+        for (const item of items) {
+          if (item["@type"] === "Product" && item.name) {
+            const name = cleanName(item.name);
+            if (name) {
+              ldResult = {
+                name,
+                price: item.offers?.price ? String(item.offers.price) : null,
+                imageUrl: Array.isArray(item.image) ? item.image[0] : item.image || null,
+                brand: item.brand?.name || null,
+                suggestedRoom: guessRoom(name),
+              };
+            }
+            break;
+          }
+        }
+      } catch {}
+    });
+    if (ldResult) { console.log("[Shopee] JSON-LD OK:", ldResult.name); return ldResult; }
+
+    // Open Graph
+    const ogTitle = $('meta[property="og:title"]').attr("content") ||
+                    $('meta[name="twitter:title"]').attr("content");
+    const ogImage = $('meta[property="og:image"]').attr("content");
+    const ogPrice = $('meta[property="product:price:amount"]').attr("content");
+
+    if (ogTitle) {
+      const name = cleanName(ogTitle);
+      if (name && !isSiteName(name)) {
+        console.log("[Shopee] OG OK:", name);
+        return {
+          name,
+          price: ogPrice || null,
+          imageUrl: ogImage || null,
+          brand: null,
+          suggestedRoom: guessRoom(name),
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("[Shopee] Scraping failed:", e.message);
+  }
+
+  // ── Estratégia 3: Extrai nome da URL ─────────────────
+  // Ex: /Calçados-Femininos-i.123456.789 → "Calçados Femininos"
+  try {
+    const path = new URL(url).pathname;
+    const nameFromUrl = path
+      .split("/")
+      .find(seg => seg && !seg.match(/^i\./))
+      ?.replace(/-/g, " ")
+      ?.trim();
+    if (nameFromUrl && nameFromUrl.length > 3) {
+      const name = cleanName(nameFromUrl);
+      if (name && !isSiteName(name)) {
+        console.log("[Shopee] URL fallback:", name);
+        return { name, price: null, imageUrl: null, brand: null, suggestedRoom: guessRoom(name) };
+      }
+    }
+  } catch {}
+
+  console.warn("[Shopee] All strategies failed for:", url);
+  return null;
 }
 
 // ════════════════════════════════════════════════════════

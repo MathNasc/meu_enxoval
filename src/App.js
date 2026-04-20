@@ -2276,7 +2276,7 @@ function RoomCharts({ items = [], rooms = [] }) {
         )}
 
         {/* Room cards grid */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:14}}>
           {roomStats.map(r => {
             const Icon       = getIcon(r.icon);
             const isDefault  = ["quarto","sala","cozinha","banheiro"].includes(r.id);
@@ -2316,37 +2316,40 @@ function RoomCharts({ items = [], rooms = [] }) {
                     </div>
 
                     {/* Stats grid: 3 columns */}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
                       {/* Pendentes */}
-                      <div style={{background:"var(--bg3)",borderRadius:9,padding:"9px 10px",textAlign:"center"}}>
-                        <p style={{fontSize:18,fontWeight:800,color:"var(--go)",lineHeight:1}}>{r.want}</p>
-                        <p style={{fontSize:9.5,color:"var(--tx3)",textTransform:"uppercase",
-                          letterSpacing:".06em",marginTop:3,fontWeight:600}}>Pendentes</p>
+                      <div style={{background:"var(--bg3)",borderRadius:9,padding:"8px 6px",textAlign:"center",minWidth:0}}>
+                        <p style={{fontSize:20,fontWeight:800,color:"var(--go)",lineHeight:1}}>{r.want}</p>
+                        <p style={{fontSize:9,color:"var(--tx3)",textTransform:"uppercase",
+                          letterSpacing:".04em",marginTop:3,fontWeight:600,whiteSpace:"nowrap"}}>Pendentes</p>
                       </div>
 
                       {/* Alta prioridade */}
                       <div style={{background: r.highPrio > 0 ? "var(--ra)" : "var(--bg3)",
-                        borderRadius:9,padding:"9px 10px",textAlign:"center",
+                        borderRadius:9,padding:"8px 6px",textAlign:"center",minWidth:0,
                         border: r.highPrio > 0 ? "1px solid rgba(217,79,92,.2)" : "none"}}>
-                        <p style={{fontSize:18,fontWeight:800,
+                        <p style={{fontSize:20,fontWeight:800,
                           color:r.highPrio>0?"var(--r)":"var(--tx3)",lineHeight:1}}>
                           {r.highPrio}
                         </p>
-                        <p style={{fontSize:9.5,textTransform:"uppercase",letterSpacing:".06em",
-                          marginTop:3,fontWeight:600,
+                        <p style={{fontSize:9,textTransform:"uppercase",letterSpacing:".04em",
+                          marginTop:3,fontWeight:600,whiteSpace:"nowrap",
                           color:r.highPrio>0?"var(--r)":"var(--tx3)"}}>
                           {r.highPrio > 0 ? "⚡ Urgentes" : "Urgentes"}
                         </p>
                       </div>
 
-                      {/* Valor total */}
-                      <div style={{background:"var(--bg3)",borderRadius:9,padding:"9px 10px",textAlign:"center"}}>
-                        <p style={{fontSize:r.totalVal>=1000?13:16,fontWeight:800,
-                          color:"var(--p)",lineHeight:1,marginTop:r.totalVal>=1000?2:0}}>
+                      {/* Valor total — fonte se adapta ao comprimento */}
+                      <div style={{background:"var(--bg3)",borderRadius:9,padding:"8px 6px",textAlign:"center",minWidth:0,overflow:"hidden"}}>
+                        <p style={{
+                          fontSize: r.totalVal >= 10000 ? 10.5 : r.totalVal >= 1000 ? 12 : 14,
+                          fontWeight:800, color:"var(--p)", lineHeight:1.2,
+                          wordBreak:"break-all", overflowWrap:"break-word",
+                        }}>
                           {fmt(r.totalVal)}
                         </p>
-                        <p style={{fontSize:9.5,color:"var(--tx3)",textTransform:"uppercase",
-                          letterSpacing:".06em",marginTop:3,fontWeight:600}}>Estimado</p>
+                        <p style={{fontSize:9,color:"var(--tx3)",textTransform:"uppercase",
+                          letterSpacing:".04em",marginTop:3,fontWeight:600}}>Estimado</p>
                       </div>
                     </div>
 
