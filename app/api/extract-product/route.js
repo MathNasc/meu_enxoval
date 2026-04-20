@@ -2,11 +2,14 @@
  * POST /api/extract-product
  * Body: { url: string }
  *
- * Extrai nome, preço e imagem de e-commerces brasileiros.
  * Estratégias por loja:
- *   - Mercado Livre → API oficial + fallback scraping OG
- *   - Shopee        → API mobile + fallback OG
+ *   - Mercado Livre → ML OAuth token (se configurado) OU fallback via URL redirect
+ *   - Shopee        → API mobile + OG
  *   - Demais        → JSON-LD + Open Graph + seletores CSS
+ *
+ * Para habilitar ML com token (recomendado):
+ *   1. Crie app gratuito em developers.mercadolivre.com.br
+ *   2. Adicione ML_APP_ID e ML_APP_SECRET no .env.local / Vercel
  */
 
 import axios from "axios";
@@ -15,146 +18,247 @@ import https from "https";
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
-const UA_LIST = [
+const UA_BROWSER = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ];
-const rUA = () => UA_LIST[Math.floor(Math.random() * UA_LIST.length)];
+const rUA = () => UA_BROWSER[Math.floor(Math.random() * UA_BROWSER.length)];
 
 const webHeaders = (url) => ({
   "User-Agent":                rUA(),
   "Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-  "Accept-Language":           "pt-BR,pt;q=0.9,en;q=0.7",
+  "Accept-Language":           "pt-BR,pt;q=0.9",
   "Accept-Encoding":           "gzip, deflate, br",
   "Cache-Control":             "no-cache",
-  "Pragma":                    "no-cache",
   "Referer":                   (() => { try { return new URL(url).origin; } catch { return ""; } })(),
-  "sec-fetch-dest":            "document",
-  "sec-fetch-mode":            "navigate",
-  "sec-fetch-site":            "none",
   "upgrade-insecure-requests": "1",
 });
 
-// ── Site name patterns — strings que NÃO são nomes de produto ──
-const SITE_NAME_PATTERNS = [
-  /^mercado\s*li(vre|bre)(\s*-|\s*:|$)/i,
-  /^shopee(\s*-|\s*:|$)/i,
-  /^amazon(\s*-|\s*:|$)/i,
-  /^magalu(\s*-|\s*:|$)/i,
-  /^magazine\s*luiza(\s*-|\s*:|$)/i,
-  /^casas\s*bahia(\s*-|\s*:|$)/i,
-  /^americanas(\s*-|\s*:|$)/i,
-  /^submarino(\s*-|\s*:|$)/i,
-  /^leroy\s*merlin(\s*-|\s*:|$)/i,
-  /^tok\s*[&e]?\s*stok(\s*-|\s*:|$)/i,
-  /^extra\s*-/i,
-];
+// ── Limpeza de nomes de produtos ─────────────────────────
+const SITE_SUFFIXES = /\s*[-|–|·|—|,]\s*(Mercado Livre|Shopee|Amazon|Magalu|Magazine Luiza|Casas Bahia|Americanas|Submarino|Leroy Merlin|Tok &? ?Stok)[^$]*/gi;
 
-const EXACT_SITE_NAMES = new Set([
-  "mercado livre", "mercado libre", "mercadolivre", "mercadolibre",
-  "shopee", "amazon", "magalu", "magazine luiza", "casas bahia",
-  "americanas", "submarino", "leroy merlin", "tok stok", "tok&stok",
-  "extra",
+const EXACT_SITES = new Set([
+  "mercado livre","mercado libre","mercadolivre","mercadolibre",
+  "shopee","amazon","magalu","magazine luiza","casas bahia",
+  "americanas","submarino","leroy merlin","tok stok","tok&stok","extra",
 ]);
+
+function cleanName(raw) {
+  if (!raw) return null;
+  let name = raw
+    .replace(/^mercado\s*li(vre|bre)\s*[:\-–]\s*/i, "")
+    .replace(/^shopee\s*[:\-–]\s*/i, "")
+    .replace(SITE_SUFFIXES, "")
+    .replace(/\s*\|\s*.*$/, "")
+    .trim()
+    .slice(0, 200);
+  if (!name || name.length < 4) return null;
+  if (EXACT_SITES.has(name.toLowerCase())) return null;
+  return name;
+}
 
 function isSiteName(name) {
   if (!name) return true;
   const n = name.toLowerCase().trim();
-  if (EXACT_SITE_NAMES.has(n)) return true;
-  if (SITE_NAME_PATTERNS.some(p => p.test(n))) return true;
-  // Very short strings are likely not product names
-  if (n.length < 4) return true;
-  return false;
+  return EXACT_SITES.has(n) || n.length < 4;
 }
 
-// Strip common site name prefixes from og:title
-// e.g. "Mercado Livre: Sofá 3 lugares" → "Sofá 3 lugares"
-function stripSitePrefix(name) {
-  if (!name) return name;
-  return name
-    .replace(/^mercado\s*li(vre|bre)\s*[:\-–]\s*/i, "")
-    .replace(/^shopee\s*[:\-–]\s*/i, "")
-    .replace(/^amazon\s*[:\-–]\s*/i, "")
-    .replace(/^magalu\s*[:\-–]\s*/i, "")
-    .replace(/^magazine\s*luiza\s*[:\-–]\s*/i, "")
-    .replace(/^casas\s*bahia\s*[:\-–]\s*/i, "")
-    .replace(/^americanas\s*[:\-–]\s*/i, "")
-    .replace(/\s*\|\s*Mercado Livre.*$/i, "")
-    .replace(/\s*\|\s*Shopee.*$/i, "")
-    .replace(/\s*[-|–]\s*(Amazon|Shopee|Magalu|Americanas|Casas Bahia|Mercado Livre).*$/i, "")
-    .trim();
-}
-
-// ═══════════════════════════════════════════════════════
-// MERCADO LIVRE — API oficial (gratuita, sem key)
-// ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// MERCADO LIVRE — 3 estratégias em cascata
+// ════════════════════════════════════════════════════════
 async function extractMercadoLivre(url) {
-  // Extrai MLB ID em múltiplos formatos de URL
-  const idPatterns = [
-    /\/p\/(MLB\d{7,12})/i,              // /p/MLB123456789 (catalog page)
-    /[\/_-](MLB\d{7,12})(?:[_\-/?#]|$)/i, // -MLB123 ou _MLB123
-    /MLB[-_]?(\d{7,12})/i,             // MLB-123 ou MLB123 (captures digits only)
-  ];
 
-  let itemId = null;
-  for (const pat of idPatterns) {
+  // ── Estratégia 1: ML API com token OAuth (mais confiável) ──
+  const ML_ID = process.env.ML_APP_ID;
+  const ML_SECRET = process.env.ML_APP_SECRET;
+  let accessToken = null;
+
+  if (ML_ID && ML_SECRET) {
+    try {
+      const tokenRes = await axios.post(
+        "https://api.mercadolibre.com/oauth/token",
+        new URLSearchParams({
+          grant_type:    "client_credentials",
+          client_id:     ML_ID,
+          client_secret: ML_SECRET,
+        }),
+        { headers: { "Content-Type": "application/x-www-form-urlencoded" }, timeout: 8_000 }
+      );
+      accessToken = tokenRes.data.access_token;
+    } catch (e) {
+      console.warn("[ML] Token fetch failed:", e.message);
+    }
+  }
+
+  if (accessToken) {
+    const itemId = extractMLId(url);
+    if (itemId) {
+      try {
+        const { data } = await axios.get(
+          `https://api.mercadolibre.com/items/${itemId}`,
+          {
+            timeout: 10_000,
+            headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+          }
+        );
+        if (data?.title) {
+          const name = cleanName(data.title);
+          if (name) {
+            return {
+              name,
+              price:    data.price ? String(data.price) : null,
+              imageUrl: (data.pictures?.[0]?.url || data.thumbnail || "").replace(/-I\.(jpg|webp)/i, "-O.$1") || null,
+              brand:    data.attributes?.find(a => a.id === "BRAND")?.value_name || null,
+              suggestedRoom: guessRoom(name),
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("[ML] API with token failed:", e.message);
+      }
+    }
+  }
+
+  // ── Estratégia 2: ML Search API (pública, sem token) ──
+  // Extrai o nome do produto da URL e busca na API de busca
+  const productNameFromUrl = extractNameFromMLUrl(url);
+  if (productNameFromUrl) {
+    try {
+      const { data } = await axios.get(
+        `https://api.mercadolibre.com/sites/MLB/search?q=${encodeURIComponent(productNameFromUrl)}&limit=1`,
+        {
+          timeout: 8_000,
+          headers: { Accept: "application/json", "User-Agent": rUA() },
+        }
+      );
+      const first = data?.results?.[0];
+      if (first?.title) {
+        const name = cleanName(first.title);
+        if (name) {
+          return {
+            name,
+            price:         first.price ? String(first.price) : null,
+            imageUrl:      first.thumbnail?.replace("-I.jpg", "-O.jpg") || null,
+            brand:         null,
+            suggestedRoom: guessRoom(name),
+          };
+        }
+      }
+    } catch (e) {
+      console.warn("[ML] Search API failed:", e.message);
+    }
+  }
+
+  // ── Estratégia 3: Scraping direto com headers de bot ──
+  try {
+    const { data: html } = await axios.get(url, {
+      headers: {
+        ...webHeaders(url),
+        "User-Agent": "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)",
+        "Accept": "text/html",
+      },
+      timeout: 10_000,
+      httpsAgent,
+      maxRedirects: 5,
+      responseType: "text",
+      decompress: true,
+    });
+
+    const $ = cheerio.load(html);
+
+    // ML injeta JSON-LD com dados do produto
+    let ldName = null, ldPrice = null, ldImage = null;
+    $('script[type="application/ld+json"]').each((_, el) => {
+      if (ldName) return;
+      try {
+        const json = JSON.parse($(el).html() || "{}");
+        const items = Array.isArray(json) ? json : [json];
+        for (const item of items) {
+          if (item["@type"] === "Product" && item.name) {
+            ldName  = item.name;
+            ldPrice = item.offers?.price || item.offers?.[0]?.price || null;
+            ldImage = Array.isArray(item.image) ? item.image[0] : item.image || null;
+            break;
+          }
+        }
+      } catch {}
+    });
+
+    if (ldName) {
+      const name = cleanName(ldName);
+      if (name) {
+        return {
+          name,
+          price:    ldPrice ? String(ldPrice) : null,
+          imageUrl: ldImage || null,
+          brand:    null,
+          suggestedRoom: guessRoom(name),
+        };
+      }
+    }
+
+    // Fallback: og:title (ML às vezes expõe para bots de redes sociais)
+    const ogTitle = $('meta[property="og:title"]').attr("content") ||
+                    $('meta[name="twitter:title"]').attr("content");
+    if (ogTitle) {
+      const name = cleanName(ogTitle);
+      if (name && !isSiteName(name)) {
+        return {
+          name,
+          price:    $('meta[property="product:price:amount"]').attr("content") || null,
+          imageUrl: $('meta[property="og:image"]').attr("content") || null,
+          brand:    null,
+          suggestedRoom: guessRoom(name),
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("[ML] Scraping failed:", e.message);
+  }
+
+  return null;
+}
+
+// Extrai MLB ID da URL
+function extractMLId(url) {
+  const patterns = [
+    /\/p\/(MLB\d{7,12})/i,
+    /[/_-](MLB\d{7,12})(?:[_\-/?#]|$)/i,
+    /MLB[-_]?(\d{7,12})/i,
+  ];
+  for (const pat of patterns) {
     const m = url.match(pat);
     if (m) {
       const raw = m[1];
-      itemId = raw.toUpperCase().startsWith("MLB") ? raw.toUpperCase() : `MLB${raw}`;
-      break;
+      return raw.toUpperCase().startsWith("MLB") ? raw.toUpperCase() : `MLB${raw}`;
     }
   }
+  return null;
+}
 
-  if (!itemId) {
-    console.warn("[ML] No item ID in URL:", url.slice(-80));
-    return null;
-  }
-
-  console.log("[ML] Fetching item:", itemId);
-
+// Extrai nome legível da URL do ML
+// Ex: /sofa-retratil-3-lugares/p/MLB... → "sofa retratil 3 lugares"
+function extractNameFromMLUrl(url) {
   try {
-    const { data } = await axios.get(
-      `https://api.mercadolibre.com/items/${itemId}`,
-      {
-        timeout: 10_000,
-        headers: { "Accept": "application/json", "User-Agent": rUA() },
-      }
-    );
-
-    if (!data?.title) {
-      console.warn("[ML] API returned no title for", itemId);
-      return null;
-    }
-
-    const cleanTitle = stripSitePrefix(data.title);
-    if (!cleanTitle || isSiteName(cleanTitle)) {
-      console.warn("[ML] Title is site name:", data.title);
-      return null;
-    }
-
-    const imageUrl =
-      (data.pictures?.[0]?.url || data.thumbnail || "")
-        .replace(/-I\.(jpg|webp)/i, "-O.$1") || null;
-
-    return {
-      name:          cleanTitle,
-      price:         data.price ? String(data.price) : null,
-      imageUrl:      imageUrl || null,
-      brand:         data.attributes?.find(a => a.id === "BRAND")?.value_name || null,
-      suggestedRoom: guessRoom(cleanTitle),
-    };
-  } catch (err) {
-    const status = err.response?.status;
-    console.warn("[ML] API error:", status, err.message);
-    // 404 = item não existe com esse ID, tenta fallback
+    const path = new URL(url).pathname;
+    // Remove IDs e segmentos técnicos
+    const clean = path
+      .replace(/\/p\/MLB\d+/gi, "")
+      .replace(/\/MLB[-\d]+/gi, "")
+      .replace(/^\/+|\/+$/g, "")
+      .split("/")[0]  // pega só o primeiro segmento
+      .replace(/-/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return clean.length > 3 ? clean : null;
+  } catch {
     return null;
   }
 }
 
-// ═══════════════════════════════════════════════════════
-// SHOPEE — API mobile informal
-// ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// SHOPEE — API mobile
+// ════════════════════════════════════════════════════════
 async function extractShopee(url) {
   const match = url.match(/i\.(\d+)\.(\d+)/);
   if (!match) return null;
@@ -177,19 +281,19 @@ async function extractShopee(url) {
     const item = data?.data?.item;
     if (!item?.name) return null;
 
-    const cleanName = stripSitePrefix(item.name);
-    if (!cleanName || isSiteName(cleanName)) return null;
+    const name = cleanName(item.name);
+    if (!name) return null;
 
-    const price    = item.price     ? item.price / 100000 :
-                     item.price_min ? item.price_min / 100000 : null;
-    const imageId  = item.image || item.images?.[0];
+    const price   = item.price     ? item.price / 100000 :
+                    item.price_min ? item.price_min / 100000 : null;
+    const imageId = item.image || item.images?.[0];
 
     return {
-      name:          cleanName,
+      name,
       price:         price ? String(price.toFixed(2)) : null,
       imageUrl:      imageId ? `https://cf.shopee.com.br/file/${imageId}` : null,
       brand:         item.brand || null,
-      suggestedRoom: guessRoom(cleanName),
+      suggestedRoom: guessRoom(name),
     };
   } catch (err) {
     console.warn("[Shopee] API error:", err.message);
@@ -197,202 +301,105 @@ async function extractShopee(url) {
   }
 }
 
-// ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
 // GENÉRICO — JSON-LD + Open Graph + seletores CSS
-// ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
 const STORE_SELECTORS = {
-  "amazon.com.br": {
-    name:  ["#productTitle", "#title"],
-    price: [".priceToPay .a-offscreen", "#priceblock_ourprice", ".a-price-whole"],
-    image: ["#imgTagWrapperId img", "#landingImage"],
-  },
-  "magazineluiza.com.br": {
-    name:  ['[data-testid="heading-product-title"]', "h1"],
-    price: ['[data-testid="price-value"]'],
-    image: ["picture img"],
-  },
-  "casasbahia.com.br": {
-    name:  ["h1.product-title", "h1"],
-    price: [".product-price__value", '[class*="price"]'],
-    image: ["#js-product-image"],
-  },
-  "americanas.com.br": {
-    name:  ["h1.product-title", "h1"],
-    price: [".priceSales", '[class*="price"]'],
-    image: [".zoom img"],
-  },
-  "leroymerlin.com.br": {
-    name:  ["h1.product-name", "h1"],
-    price: [".price-box__price", '[class*="price"]'],
-    image: ["picture img"],
-  },
+  "amazon.com.br":        { name: ["#productTitle","#title"],       price: [".priceToPay .a-offscreen","#priceblock_ourprice",".a-price-whole"], image: ["#imgTagWrapperId img","#landingImage"] },
+  "magazineluiza.com.br": { name: ['[data-testid="heading-product-title"]',"h1"], price: ['[data-testid="price-value"]'],          image: ["picture img"] },
+  "casasbahia.com.br":    { name: ["h1.product-title","h1"],         price: [".product-price__value",'[class*="price"]'],          image: ["#js-product-image"] },
+  "americanas.com.br":    { name: ["h1.product-title","h1"],         price: [".priceSales",'[class*="price"]'],                    image: [".zoom img"] },
+  "leroymerlin.com.br":   { name: ["h1.product-name","h1"],          price: [".price-box__price",'[class*="price"]'],              image: ["picture img"] },
 };
-
-function getStoreConfig(url) {
-  try {
-    const h = new URL(url).hostname.toLowerCase();
-    for (const [domain, cfg] of Object.entries(STORE_SELECTORS)) {
-      if (h.includes(domain)) return cfg;
-    }
-  } catch {}
-  return null;
-}
-
-function getOG($) {
-  const m = (...props) => {
-    for (const p of props) {
-      const v = $(`meta[property="${p}"]`).attr("content") ||
-                $(`meta[name="${p}"]`).attr("content");
-      if (v?.trim()) return v.trim();
-    }
-    return null;
-  };
-  return {
-    name:     m("og:title", "twitter:title"),
-    imageUrl: m("og:image", "twitter:image", "og:image:secure_url"),
-    price:    m("product:price:amount", "og:price:amount", "price"),
-  };
-}
-
-function getJsonLd($) {
-  let result = null;
-  $('script[type="application/ld+json"]').each((_, el) => {
-    if (result) return;
-    try {
-      const json  = JSON.parse($(el).html() || "{}");
-      const items = Array.isArray(json) ? json : [json];
-      for (const item of items) {
-        if (item["@type"] === "Product" && item.name) {
-          const offer = item.offers?.price || item.offers?.[0]?.price;
-          result = {
-            name:     item.name,
-            price:    offer ? String(offer) : null,
-            imageUrl: Array.isArray(item.image) ? item.image[0] : item.image || null,
-            brand:    item.brand?.name || null,
-          };
-          return;
-        }
-      }
-    } catch {}
-  });
-  return result;
-}
-
-function getText($, sels) {
-  for (const s of (sels || [])) {
-    if (s.startsWith("meta")) {
-      const v = $(s).attr("content");
-      if (v?.trim()) return v.trim();
-    }
-    const t = $(s).first().text().replace(/\s+/g, " ").trim();
-    if (t?.length > 3) return t;
-  }
-  return null;
-}
-
-function getAttr($, sels, attr) {
-  for (const s of (sels || [])) {
-    const v = $(s).first().attr(attr);
-    if (v?.trim() && !v.startsWith("data:")) return v.trim();
-  }
-  return null;
-}
 
 function parsePrice(str) {
   if (!str) return null;
-  const c = String(str)
-    .replace(/R\$\s*/g, "")
-    .replace(/\s/g, "")
-    .replace(/\.(?=\d{3})/g, "")
-    .replace(",", ".");
+  const c = String(str).replace(/R\$\s*/g,"").replace(/\s/g,"").replace(/\.(?=\d{3})/g,"").replace(",",".");
   const n = parseFloat(c);
   return (!isNaN(n) && n > 0 && n < 500_000) ? n : null;
-}
-
-function extractPrice($, storeSels) {
-  const all = [...(storeSels || []),
-    '[class*="price"]', '[class*="preco"]', '[class*="valor"]', ".price"];
-  for (const s of all) {
-    if (s.startsWith("meta")) {
-      const n = parsePrice($(s).attr("content"));
-      if (n) return n;
-      continue;
-    }
-    const text = $(s).first().text().replace(/\s+/g, " ").trim();
-    if (!text) continue;
-    const m = text.match(/R\$\s*([\d.,]+)/) ||
-              text.match(/([\d]{1,3}(?:\.[\d]{3})*,\d{2})/) ||
-              text.match(/([\d]+,\d{2})/);
-    if (m) {
-      const n = parsePrice(m[0] || m[1]);
-      if (n) return n;
-    }
-  }
-  return null;
 }
 
 async function extractGeneric(url) {
   let html;
   try {
     const { data } = await axios.get(url, {
-      headers:      webHeaders(url),
-      timeout:      12_000,
-      maxRedirects: 5,
-      httpsAgent,
-      responseType: "text",
-      decompress:   true,
+      headers: webHeaders(url), timeout: 12_000,
+      maxRedirects: 5, httpsAgent, responseType: "text", decompress: true,
     });
     html = data;
   } catch (err) {
-    console.warn("[Generic] fetch error:", err.message);
+    console.warn("[Generic] fetch:", err.message);
     return null;
   }
 
   const $   = cheerio.load(html);
-  const cfg = getStoreConfig(url);
-  const og  = getOG($);
-  const ld  = getJsonLd($);
+  const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } })();
+  const cfg  = Object.entries(STORE_SELECTORS).find(([d]) => host.includes(d))?.[1];
 
-  // Strip site prefixes from og:title before using it
-  const ogNameClean = stripSitePrefix(og.name || "");
+  // JSON-LD
+  let ldName = null, ldPrice = null, ldImage = null, ldBrand = null;
+  $('script[type="application/ld+json"]').each((_, el) => {
+    if (ldName) return;
+    try {
+      const items = [].concat(JSON.parse($(el).html() || "{}"));
+      for (const item of items) {
+        if (item["@type"] === "Product" && item.name) {
+          ldName  = item.name;
+          ldPrice = item.offers?.price || item.offers?.[0]?.price || null;
+          ldImage = Array.isArray(item.image) ? item.image[0] : item.image || null;
+          ldBrand = item.brand?.name || null;
+          break;
+        }
+      }
+    } catch {}
+  });
 
-  const rawName =
-    (ld?.name   ? stripSitePrefix(ld.name)     : null) ||
-    (cfg?.name  ? getText($, cfg.name)          : null) ||
-    (ogNameClean && ogNameClean.length > 3 ? ogNameClean : null) ||
-    (() => {
-      const h1 = $("h1").first().text().trim();
-      return h1?.length > 3 ? stripSitePrefix(h1) : null;
-    })() ||
-    (() => {
-      const t = $("title").text().replace(/\s*[-|–|·|—].*$/, "").trim();
-      return t?.length > 3 ? stripSitePrefix(t) : null;
-    })() ||
-    null;
+  // Open Graph
+  const ogTitle    = $('meta[property="og:title"]').attr("content") || $('meta[name="twitter:title"]').attr("content");
+  const ogImage    = $('meta[property="og:image"]').attr("content");
+  const ogPrice    = $('meta[property="product:price:amount"]').attr("content") || $('meta[property="og:price:amount"]').attr("content");
 
-  const price =
-    (ld?.price   ? parsePrice(ld.price)  : null) ||
-    extractPrice($, cfg?.price) ||
-    parsePrice(og.price) ||
-    null;
+  // CSS selectors
+  const cssName = cfg?.name ? (() => {
+    for (const s of cfg.name) {
+      const t = $(s).first().text().replace(/\s+/g," ").trim();
+      if (t?.length > 3) return t;
+    }
+    return null;
+  })() : null;
 
-  const imageUrl =
-    ld?.imageUrl ||
-    (cfg?.image ? getAttr($, cfg.image, "src") : null) ||
-    og.imageUrl ||
-    null;
+  const cssPrice = cfg?.price ? (() => {
+    for (const s of cfg.price) {
+      const text = $(s).first().text().replace(/\s+/g," ").trim();
+      const m = text.match(/R\$\s*([\d.,]+)/);
+      if (m) return parsePrice(m[0]);
+    }
+    return null;
+  })() : null;
+
+  const cssImage = cfg?.image ? (() => {
+    for (const s of cfg.image) {
+      const v = $(s).first().attr("src");
+      if (v && !v.startsWith("data:")) return v;
+    }
+    return null;
+  })() : null;
+
+  // Priority: JSON-LD > CSS > Open Graph
+  const rawName = ldName || cssName || ogTitle || $("h1").first().text().trim() || null;
+  const name    = cleanName(rawName);
 
   return {
-    name:     rawName,
-    price:    price ? String(price) : null,
-    imageUrl: imageUrl || null,
-    brand:    ld?.brand || $('meta[property="og:brand"]').attr("content") || null,
+    name:     name && !isSiteName(name) ? name : null,
+    price:    ldPrice ? String(ldPrice) : (cssPrice ? String(cssPrice) : (parsePrice(ogPrice) ? String(parsePrice(ogPrice)) : null)),
+    imageUrl: ldImage || cssImage || ogImage || null,
+    brand:    ldBrand || null,
   };
 }
 
-// ═══════════════════════════════════════════════════════
-// Detecta cômodo pelo nome do produto
-// ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// Detecta cômodo pelo nome
+// ════════════════════════════════════════════════════════
 function guessRoom(name) {
   if (!name) return "outro";
   const n = name.toLowerCase();
@@ -403,9 +410,9 @@ function guessRoom(name) {
   return "outro";
 }
 
-// ═══════════════════════════════════════════════════════
-// HANDLER PRINCIPAL
-// ═══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// HANDLER
+// ════════════════════════════════════════════════════════
 export async function POST(req) {
   let url;
   try { ({ url } = await req.json()); }
@@ -417,25 +424,24 @@ export async function POST(req) {
   const host = (() => { try { return new URL(url).hostname.toLowerCase(); } catch { return ""; } })();
   let result = null;
 
-  // 1. Estratégias específicas por loja
   if (host.includes("mercadolivre.com.br") || host.includes("mercadolibre.com")) {
     result = await extractMercadoLivre(url);
   } else if (host.includes("shopee.com.br")) {
     result = await extractShopee(url);
   }
 
-  // 2. Fallback genérico (OG + JSON-LD + CSS)
   if (!result?.name || isSiteName(result.name)) {
-    console.log("[extract-product] Trying generic fallback for:", host);
     const generic = await extractGeneric(url);
     if (generic?.name && !isSiteName(generic.name)) {
       result = { ...result, ...generic };
     }
   }
 
-  // 3. Nada encontrado — retorna aviso para preenchimento manual
-  if (!result?.name || isSiteName(result.name)) {
-    console.warn("[extract-product] No product data from:", host);
+  const name = result?.name && !isSiteName(result.name)
+    ? cleanName(result.name)
+    : null;
+
+  if (!name) {
     return Response.json({
       name: null, price: null, imageUrl: null, brand: null,
       suggestedRoom: "outro",
@@ -443,21 +449,7 @@ export async function POST(req) {
     });
   }
 
-  // Limpeza final do nome
-  const name = stripSitePrefix(result.name)
-    ?.replace(/\s*\|\s*.*$/, "")
-    ?.trim()
-    ?.slice(0, 200) || null;
-
-  if (!name || isSiteName(name)) {
-    return Response.json({
-      name: null, price: null, imageUrl: null, brand: null,
-      suggestedRoom: "outro",
-      warning: "Não consegui extrair o nome do produto. Preencha manualmente.",
-    });
-  }
-
-  console.log("[extract-product] OK:", { name, price: result.price, image: !!result.imageUrl });
+  console.log("[extract-product] OK:", { name, price: result.price, host });
 
   return Response.json({
     name,
