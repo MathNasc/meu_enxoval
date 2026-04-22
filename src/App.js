@@ -29,6 +29,17 @@ import { useSettings } from "./lib/hooks/useSettings";
 import AuthScreen     from "./components/AuthScreen";
 import HouseholdModal from "./components/HouseholdModal";
 
+// ── Utils, constantes e hooks extraídos (Semana 1 refactor) ──
+import {
+  fmt, daysLeft, uid, todayStr,
+  isActive, isDeleted, TRASH_DAYS, trashDaysLeft, getPromoInfo,
+} from "./lib/utils/format";
+import {
+  ICONS_MAP, PALETTE, STORE_MAP, ROOM_SUGGESTIONS_BY_NAME,
+  getIcon, getStore, getRoomSuggestions,
+} from "./lib/constants/index";
+import { useFilters, filterReducer, FILTER_INITIAL } from "./lib/hooks/useFilters";
+
 // ════════════════════════════════════════════════════════
 // STYLES (idêntico ao v4 — mantido para brevidade)
 // ════════════════════════════════════════════════════════
@@ -210,72 +221,7 @@ const Styles = () => (
   `}</style>
 );
 
-// ════════════════════════════════════════════════════════
-// CONSTANTS
-// ════════════════════════════════════════════════════════
-// FIX #2: chave normalizada pelo NOME do cômodo (não id UUID)
-// Salas do Supabase têm UUIDs; normalizamos para match por nome
-const ROOM_SUGGESTIONS_BY_NAME = {
-  "quarto":   ["Cama box","Colchão","Cabeceira","Guarda-roupa","Cômoda","Criado-mudo","Espelho","Cortina","Edredom","Travesseiro","Abajur"],
-  "sala":     ["Sofá","Mesa de centro","Rack TV","Televisão","Tapete","Luminária","Quadro","Poltrona","Prateleira","Cortina","Aparador"],
-  "cozinha":  ["Geladeira","Fogão","Micro-ondas","Panelas","Talheres","Pratos","Copos","Liquidificador","Lixeira","Escorredor","Tábua de corte"],
-  "banheiro": ["Toalha de banho","Toalha de rosto","Tapete","Espelho","Porta-shampoo","Saboneteira","Suporte papel","Lixeira"],
-};
-// Helper: dado um room id, retorna suas sugestões pelo nome normalizado
-function getRoomSuggestions(roomId, rooms, existingItems) {
-  const room = rooms.find(r => r.id === roomId);
-  if (!room) return [];
-  const key = room.name.toLowerCase().trim()
-    .normalize("NFD").replace(/[̀-ͯ]/g, ""); // remove acentos
-  // tenta match exato ou parcial
-  const list = ROOM_SUGGESTIONS_BY_NAME[key] ||
-    Object.entries(ROOM_SUGGESTIONS_BY_NAME).find(([k]) => key.includes(k))?.[1] || [];
-  return list.filter(s =>
-    !existingItems.some(i => i?.name?.toLowerCase() === s.toLowerCase())
-  ).slice(0, 6);
-}
-
-const STORE_MAP = [
-  {p:"amazon.com.br",       n:"Amazon",       bg:"#FF9900",fg:"#000"},
-  {p:"mercadolivre.com.br", n:"Mercado Livre",bg:"#FFE600",fg:"#333"},
-  {p:"shopee.com.br",       n:"Shopee",       bg:"#EE4D2D",fg:"#fff"},
-  {p:"magazineluiza.com.br",n:"Magalu",       bg:"#0066CC",fg:"#fff"},
-  {p:"casasbahia.com.br",   n:"Casas Bahia",  bg:"#F7941D",fg:"#fff"},
-  {p:"americanas.com.br",   n:"Americanas",   bg:"#E8192C",fg:"#fff"},
-  {p:"leroymerlin.com.br",  n:"Leroy Merlin", bg:"#78BE1F",fg:"#fff"},
-];
-
-const ICONS_MAP = {
-  bed:BedDouble,sofa:Sofa,utensils:UtensilsCrossed,bath:Bath,
-  home:Home,star:Star,zap:Zap,heart:Heart,target:Target,package:Package,
-  shopping:ShoppingBag,dollar:DollarSign,layers:Layers,boxes:Boxes,
-  wallet:Wallet,sparkles:Sparkles,bell:Bell,award:Award,
-};
-const PALETTE = ["#1272AA","#2A9D8F","#E9A830","#7058C8","#D4875A","#D94F7A","#20B2AA","#5D9E3A"];
-
-const getIcon  = (k) => ICONS_MAP[k] || Home;
-const uid      = ()  => Math.random().toString(36).slice(2)+Date.now().toString(36);
-const fmt      = (v) => { const n=parseFloat(v); return isNaN(n)?"—":n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); };
-const daysLeft = (d) => { if(!d) return null; try{const t=new Date(d+"T00:00:00"),n=new Date();n.setHours(0,0,0,0);return Math.round((t-n)/86400000);}catch{return null;} };
-const getStore = (url) => { if(!url) return null; try{const h=new URL(url).hostname.toLowerCase();return STORE_MAP.find(s=>h.includes(s.p))||null;}catch{return null;} };
-const todayStr = () => new Date().toISOString().slice(0,10);
-const isActive  = (i) => !i?.deletedAt;
-const isDeleted = (i) => !!i?.deletedAt;
-const TRASH_DAYS = 30;
-const trashDaysLeft = (item) => {
-  if(!item?.deletedAt) return null;
-  try{const d=new Date(item.deletedAt),exp=new Date(d.getTime()+TRASH_DAYS*86400000);return Math.max(0,Math.ceil((exp-new Date())/86400000));}catch{return null;}
-};
-const getPromoInfo = (item) => {
-  const cur=parseFloat(item?.price);
-  if(!item?.price||isNaN(cur)||cur<=0) return null;
-  const prices=(item.priceHistory||[]).map(h=>parseFloat(h.price)).filter(p=>!isNaN(p)&&p>0);
-  if(!prices.length) return null;
-  const ref=Math.max(...prices);
-  if(ref<=cur) return null;
-  const disc=Math.round(((ref-cur)/ref)*100);
-  return disc>=10?{discount:disc,originalPrice:ref}:null;
-};
+// Constants, utils e ICONS_MAP → ver src/lib/constants/index.js e src/lib/utils/format.js
 
 // ════════════════════════════════════════════════════════
 // AI SERVICE — rotas Next.js locais
@@ -1022,37 +968,7 @@ function TrashView({items=[],rooms=[],onRestore,onPermanentDelete,onEmptyTrash})
 // FILTER REDUCER — estado único para todos os filtros de Meus Itens
 // Elevado ao App para sobreviver a re-renders e troca de abas.
 // ════════════════════════════════════════════════════════
-const FILTER_INITIAL = {
-  search:   "",
-  fRoom:    "all",
-  fStatus:  "all",
-  fPrio:    "all",
-  fStar:    false,
-  fPromo:   false,
-  minPrice:    "",      // "" = sem limite inferior
-  maxPrice:    "",      // "" = sem limite superior
-  sort:        "recent",
-  vw:          "grid",
-  filtersOpen: false,  // painel de filtros colapsável
-};
-
-function filterReducer(state, action) {
-  switch (action.type) {
-    case "SET_SEARCH":  return { ...state, search:  action.payload };
-    case "SET_ROOM":    return { ...state, fRoom:   action.payload };
-    case "SET_STATUS":  return { ...state, fStatus: action.payload };
-    case "SET_PRIO":    return { ...state, fPrio:   action.payload };
-    case "TOGGLE_STAR": return { ...state, fStar:   !state.fStar   };
-    case "TOGGLE_PROMO":return { ...state, fPromo:  !state.fPromo  };
-    case "SET_SORT":      return { ...state, sort:     action.payload };
-    case "SET_VW":        return { ...state, vw:       action.payload };
-    case "TOGGLE_PANEL":  return { ...state, filtersOpen: !state.filtersOpen };
-    case "SET_MIN_PRICE": return { ...state, minPrice: action.payload };
-    case "SET_MAX_PRICE": return { ...state, maxPrice: action.payload };
-    case "CLEAR":         return { ...FILTER_INITIAL, vw: state.vw, filtersOpen: state.filtersOpen }; // mantém grid/list e painel aberto/fechado
-    default:            return state;
-  }
-}
+// filterReducer + FILTER_INITIAL → ver src/lib/hooks/useFilters.js
 
 function AppInner() {
   const auth     = useAuth();
@@ -1519,8 +1435,7 @@ function RoomCharts({ items = [], rooms = [] }) {
       .map(d => ({ name: d.fullName, value: d.value, color: d.color }))
   ), [data]);
 
-  const fmt = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
-
+  // fmt importado de src/lib/utils/format.js (versão com centavos)
   if (!data.length) return (
     <div style={{ textAlign: "center", padding: "32px 0", color: "var(--tx3)", fontSize: 13 }}>
       Nenhum dado disponível — adicione itens com preço para ver os gráficos.
