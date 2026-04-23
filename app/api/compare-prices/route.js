@@ -234,6 +234,28 @@ function dedupeAndSort(offers) {
 /* ════════════════════════════════════════
    HANDLER PRINCIPAL
 ════════════════════════════════════════ */
+// ── SSRF protection ───────────────────────────────────────
+// Blocks internal IPs, localhost and non-http(s) protocols
+// to prevent Server-Side Request Forgery attacks
+function isAllowedUrl(raw) {
+  try {
+    const { protocol, hostname } = new URL(raw);
+    if (!["http:", "https:"].includes(protocol)) return false;
+    const h = hostname.toLowerCase();
+    // Block loopback, private ranges and cloud metadata endpoints
+    if (/^(localhost|127\.\d+\.\d+\.\d+)$/.test(h)) return false;
+    if (/^10\./.test(h)) return false;
+    if (/^192\.168\./.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+    if (h === "169.254.169.254") return false;        // AWS metadata
+    if (h === "metadata.google.internal") return false; // GCP metadata
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
 export async function POST(req) {
   let productName;
   try { ({ productName } = await req.json()); }
