@@ -39,6 +39,20 @@ import {
   getIcon, getStore, getRoomSuggestions,
 } from "./lib/constants/index";
 import { useFilters, filterReducer, FILTER_INITIAL } from "./lib/hooks/useFilters";
+import { AI } from "./lib/services/api";
+
+// ── Componentes extraídos (Semana 2 refactor) ─────────────
+import ItemCard          from "./components/items/ItemCard";
+import TrashView         from "./components/items/TrashView";
+import QuickAddModal     from "./components/modals/QuickAddModal";
+import ItemModal         from "./components/modals/ItemModal";
+import CompleteHomeModal from "./components/modals/CompleteHomeModal";
+import RoomModal         from "./components/modals/RoomModal";
+import DeleteButton      from "./components/ui/DeleteButton";
+import PricePanel        from "./components/ui/PricePanel";
+import StoreBadge        from "./components/ui/StoreBadge";
+import PromoBadge        from "./components/ui/PromoBadge";
+import Toast             from "./components/ui/Toast";
 
 // ════════════════════════════════════════════════════════
 // STYLES (idêntico ao v4 — mantido para brevidade)
@@ -223,35 +237,7 @@ const Styles = () => (
 
 // Constants, utils e ICONS_MAP → ver src/lib/constants/index.js e src/lib/utils/format.js
 
-// ════════════════════════════════════════════════════════
-// AI SERVICE — rotas Next.js locais
-// ════════════════════════════════════════════════════════
-const AI = {
-  extractProduct: async (url) => {
-    const res = await fetch("/api/extract-product",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({url}),
-    });
-    if(!res.ok){const e=await res.json().catch(()=>({}));throw new Error(e.detail||e.error||`Erro ${res.status}`);}
-    return res.json();
-  },
-  comparePrice: async (productName) => {
-    const res = await fetch("/api/compare-prices",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({productName}),
-    });
-    if(!res.ok) throw new Error(`Erro ${res.status}`);
-    return res.json();
-  },
-  completeHome: async (rooms,items,aptSize) => {
-    const res = await fetch("/api/complete-home",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({rooms,items,aptSize}),
-    });
-    if(!res.ok) throw new Error(`Erro ${res.status}`);
-    return res.json();
-  },
-};
+// AI → src/lib/services/api.js
 
 // ════════════════════════════════════════════════════════
 // PRIMITIVES (Sk, StoreBadge, DeleteButton, Toast, etc.)
@@ -260,23 +246,9 @@ const Sk = ({w="100%",h=14,r=8}) => (
   <span className="shimmer" style={{width:w,height:h,borderRadius:r,display:"block"}}/>
 );
 
-const StoreBadge = ({url}) => {
-  const s=getStore(url); if(!s) return null;
-  return <span className="sbdg" style={{background:s.bg,color:s.fg}}>{s.n}</span>;
-};
+// StoreBadge → src/components/ui/StoreBadge.jsx
 
-const PromoBadge = ({promoInfo}) => {
-  if(!promoInfo) return null;
-  return (
-    <div className="promo-strip">
-      <BadgePercent size={13}/>
-      <span>🔥 Em promoção — {promoInfo.discount}% OFF</span>
-      <span style={{fontWeight:400,opacity:.7,marginLeft:4,textDecoration:"line-through",fontSize:11}}>
-        era {fmt(promoInfo.originalPrice)}
-      </span>
-    </div>
-  );
-};
+// PromoBadge → src/components/ui/PromoBadge.jsx
 
 // FIX #4: BudgetInput com debounce — evita salvar a cada tecla
 function BudgetInput({ value, onSave }) {
@@ -317,26 +289,9 @@ function BudgetInput({ value, onSave }) {
   );
 }
 
-function DeleteButton({onConfirm,size=13}) {
-  const [armed,setArmed]=useState(false);
-  const tr=useRef(null);
-  const handle=(e)=>{e.stopPropagation();if(!armed){setArmed(true);tr.current=setTimeout(()=>setArmed(false),3000);}else{clearTimeout(tr.current);onConfirm();}};
-  useEffect(()=>()=>clearTimeout(tr.current),[]);
-  return (
-    <button className="btn btn-g bico" onClick={handle} title={armed?"Confirmar exclusão":"Excluir"}
-      style={{color:armed?"white":undefined,background:armed?"var(--r)":undefined,
-        padding:armed?"4px 9px":undefined,gap:4,fontSize:armed?11:undefined,fontWeight:armed?700:undefined,transition:"all .2s"}}>
-      <Trash2 size={size}/>{armed&&"Confirmar"}
-    </button>
-  );
-}
+// DeleteButton → src/components/ui/DeleteButton.jsx
 
-function Toast({toasts}) {
-  if(!toasts.length) return null;
-  const t=toasts[toasts.length-1];
-  const c={success:"var(--g)",error:"var(--r)",info:"var(--p)",warn:"var(--go)",trash:"#666"};
-  return <div className="toast" style={{background:c[t.type]||c.info,color:"white"}}>{t.message}</div>;
-}
+// Toast → src/components/ui/Toast.jsx
 
 const InsightCard = ({type="info",text,Icon=Lightbulb,delay=0}) => (
   <div className={`ins ins-${type}`} style={{animationDelay:`${delay}s`}}>
@@ -344,621 +299,32 @@ const InsightCard = ({type="info",text,Icon=Lightbulb,delay=0}) => (
   </div>
 );
 
-// ════════════════════════════════════════════════════════
-// PRICE PANEL
-// ════════════════════════════════════════════════════════
-function PricePanel({item,onUpdatePrice}) {
-  const [open,setOpen]=useState(false);
-  const [loading,setLoading]=useState(false);
-  const [offers,setOffers]=useState(Array.isArray(item?.priceOffers)?item.priceOffers:[]);
-  const [error,setError]=useState("");
-  const fetched=offers.length>0;
 
-  const doCompare=async()=>{
-    if(!item?.name) return;
-    setLoading(true);setError("");setOpen(true);
-    try{
-      const r=await AI.comparePrice(item.name);
-      const valid=(r?.offers||[]).filter(o=>o?.price>0).sort((a,b)=>a.price-b.price).slice(0,6);
-      setOffers(valid);
-      if(valid.length>0&&onUpdatePrice) onUpdatePrice(item.id,valid);
-    }catch{setError("Não foi possível buscar os preços agora.");}
-    finally{setLoading(false);}
-  };
+// PricePanel → src/components/ui/PricePanel.jsx
 
-  const best=offers[0];
-  const curPrc=parseFloat(item?.price);
-  const saving=best&&!isNaN(curPrc)&&curPrc>best.price?curPrc-best.price:0;
 
-  return (
-    <div style={{marginTop:9,paddingTop:9,borderTop:"1px solid var(--bdr)"}}>
-      <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
-        {!fetched?(
-          <button onClick={doCompare} disabled={loading} className="btn btn-g"
-            style={{fontSize:11.5,fontWeight:700,color:"var(--p)",gap:4,padding:"4px 9px",background:"var(--pa)",borderRadius:8}}>
-            {loading?<><Loader2 size={12} style={{animation:"spin 1s linear infinite"}}/>Buscando...</>
-                    :<><BarChart2 size={12}/>Comparar preços</>}
-          </button>
-        ):(
-          <>
-            {best&&(
-              <div style={{display:"flex",alignItems:"center",gap:6,flex:1,flexWrap:"wrap"}}>
-                <span style={{fontSize:12,fontWeight:800,color:"var(--g)"}}>🏆 {fmt(best.price)}</span>
-                <span className="best-tag">{best.store}</span>
-                {saving>0&&<span style={{fontSize:11,color:"var(--g)",background:"var(--ga)",padding:"1px 7px",borderRadius:99,fontWeight:700}}>economize {fmt(saving)}</span>}
-              </div>
-            )}
-            <button onClick={()=>setOpen(o=>!o)} className="btn btn-g" style={{fontSize:11,padding:"3px 8px",gap:3,marginLeft:"auto"}}>
-              {open?<ChevronUp size={12}/>:<ChevronDown size={12}/>}{open?"Ocultar":`${offers.length} lojas`}
-            </button>
-            <button onClick={doCompare} disabled={loading} className="btn btn-g bico" title="Atualizar">
-              <RefreshCw size={12} style={loading?{animation:"spin 1s linear infinite"}:{}}/>
-            </button>
-          </>
-        )}
-      </div>
-      {error&&<p style={{fontSize:11.5,color:"var(--r)",marginTop:6}}>{error} <button onClick={doCompare} style={{color:"var(--p)",background:"none",border:"none",cursor:"pointer",fontSize:11.5,fontWeight:700}}>Tentar novamente</button></p>}
-      {fetched&&open&&(
-        <div style={{marginTop:9,background:"var(--bg3)",borderRadius:10,overflow:"hidden",border:"1px solid var(--bdr)"}}>
-          {offers.map((o,i)=>(
-            <div key={i} className={`price-row ${i===0?"best":""}`}>
-              <div style={{display:"flex",alignItems:"center",gap:7}}>
-                {i===0&&<span style={{fontSize:11}}>🏆</span>}
-                <span style={{fontWeight:600,color:"var(--tx)"}}>{o.store}</span>
-                {!o.inStock&&<span style={{fontSize:10,color:"var(--r)"}}>indisponível</span>}
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:7}}>
-                <span style={{fontWeight:800,fontSize:13.5,color:i===0?"var(--g)":"var(--tx)"}}>{fmt(o.price)}</span>
-                {o.url&&<a href={o.url} target="_blank" rel="noopener noreferrer" className="btn btn-g bico" style={{textDecoration:"none",width:26,height:26}}><ExternalLink size={11}/></a>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
-// ════════════════════════════════════════════════════════
-// QUICK ADD MODAL
-// ════════════════════════════════════════════════════════
-function QuickAddModal({rooms=[],items=[],onSave,onClose}) {
-  const [url,setUrl]=useState("");
-  const [name,setName]=useState("");
-  const [roomId,setRoomId]=useState(rooms[0]?.id||"");
-  const [loading,setLoading]=useState(false);
-  const [step,setStep]=useState(1);
-  const [extracted,setExtracted]=useState(null);
-  const [error,setError]=useState("");
-  const urlRef=useRef(null);
-  useEffect(()=>{setTimeout(()=>urlRef.current?.focus(),80);},[]);
+// QuickAddModal → src/components/modals/QuickAddModal.jsx
 
-  const doExtract=useCallback(async(target)=>{
-    const u=(target||url).trim();
-    if(!u||!u.startsWith("http")) return;
-    setLoading(true);setError("");setStep(2);
-    try{
-      const info=await AI.extractProduct(u);
-      setExtracted(info||{});
-      if(info?.name) setName(info.name);
-      if(info?.suggestedRoom&&info.suggestedRoom!=="outro"){
-        const m=rooms.find(r=>r.id===info.suggestedRoom);
-        if(m) setRoomId(m.id);
-      }
-    }catch(e){setError("Não consegui extrair automaticamente. Preencha manualmente. ("+e.message+")");}
-    finally{setLoading(false);}
-  },[url,rooms]);
 
-  const handlePaste=useCallback((e)=>{
-    const t=e.clipboardData?.getData("text")||"";
-    if(t.startsWith("http")){e.preventDefault();setUrl(t);setTimeout(()=>doExtract(t),80);}
-    else if(t.length>2){setName(t);setStep(2);}
-  },[doExtract]);
 
-  const handleSave=()=>{
-    if(!name.trim()||!roomId) return;
-    const priceStr=extracted?.price?String(extracted.price):"";
-    onSave({name:name.trim(),link:url.trim(),price:priceStr,imageUrl:extracted?.imageUrl||"",
-      status:"want",priority:"normal",roomId,notes:extracted?.brand?`Marca: ${extracted.brand}`:"",
-      starred:false,priceHistory:priceStr?[{price:parseFloat(priceStr),date:todayStr(),source:"auto"}]:[],priceOffers:[]});
-  };
+// ItemModal → src/components/modals/ItemModal.jsx
 
-  // FIX #2: usa nome do cômodo para buscar sugestões, não o UUID
-  const suggs=getRoomSuggestions(roomId, rooms, items||[]);
-  const RoomPicker=()=>(
-    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-      {rooms.map(r=>{const Icon=getIcon(r.icon);const on=roomId===r.id;return(
-        <button key={r.id} onClick={()=>setRoomId(r.id)} style={{padding:"7px 12px",borderRadius:9,cursor:"pointer",fontFamily:"var(--f)",fontSize:12.5,fontWeight:600,
-          border:`1.5px solid ${on?r.color:"var(--bdr)"}`,background:on?`${r.color}18`:"transparent",color:on?r.color:"var(--tx3)",transition:"all .18s",display:"flex",alignItems:"center",gap:5}}>
-          <Icon size={12}/>{r.name}
-        </button>
-      );})}
-    </div>
-  );
 
-  return (
-    <div className="mbk" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{padding:"26px",maxWidth:480}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div>
-            <h2 className="fd" style={{fontSize:21,fontWeight:600}}>Adicionar rápido</h2>
-            <span className="aitag" style={{marginTop:4,display:"inline-flex"}}><Sparkles size={9}/>Scraping automático</span>
-          </div>
-          <button className="btn btn-g bico" onClick={onClose}><X size={18}/></button>
-        </div>
-        {step===1&&(
-          <div style={{display:"flex",flexDirection:"column",gap:16}}>
-            <div>
-              <label className="lbl">Cole o link ou escreva o nome</label>
-              <div style={{position:"relative"}}>
-                <input ref={urlRef} className="inp" placeholder="https://... ou nome do produto"
-                  value={url} onChange={e=>setUrl(e.target.value)} onPaste={handlePaste}
-                  onKeyDown={e=>e.key==="Enter"&&url.startsWith("http")&&doExtract()}
-                  style={{paddingRight:url?106:14}}/>
-                {url&&<button className="btn btn-p" onClick={()=>doExtract()}
-                  style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",padding:"6px 11px",fontSize:12}}>
-                  <Sparkles size={12}/>Preencher
-                </button>}
-              </div>
-              <p style={{fontSize:11.5,color:"var(--tx3)",marginTop:6,lineHeight:1.5}}>
-                🔗 Cole um link → extrai nome, preço e imagem automaticamente
-              </p>
-            </div>
-            <div><label className="lbl">Cômodo</label><RoomPicker/></div>
-            {suggs.length>0&&(
-              <div>
-                <label className="lbl">Sugestões rápidas</label>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                  {suggs.map(s=><button key={s} className="sch" onClick={()=>{setName(s);setStep(2);}}><Plus size={9}/>{s}</button>)}
-                </div>
-              </div>
-            )}
-            <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
-              <button className="btn btn-s" onClick={onClose}><X size={13}/>Cancelar</button>
-              <button className="btn btn-p" onClick={()=>setStep(2)} disabled={!url.trim()&&!name.trim()} style={(!url.trim()&&!name.trim())?{opacity:.5,cursor:"not-allowed"}:{}}>Continuar<ArrowRight size={14}/></button>
-            </div>
-          </div>
-        )}
-        {step===2&&(
-          <div style={{display:"flex",flexDirection:"column",gap:14}}>
-            {loading&&<><Sk h={54} w="100%"/><Sk h={14} w="80%"/><Sk h={11} w="40%"/></>}
-            {!loading&&extracted&&!error&&(
-              extracted.name ? (
-                <div style={{background:"var(--ga)",border:"1px solid rgba(42,157,143,.3)",borderRadius:10,padding:"12px 14px",display:"flex",gap:12}}>
-                  {extracted.imageUrl&&<img src={extracted.imageUrl} alt="" style={{width:54,height:54,objectFit:"cover",borderRadius:8,flexShrink:0}} onError={e=>{e.target.style.display="none";}}/>}
-                  <div style={{flex:1,minWidth:0}}>
-                    <p style={{fontSize:10.5,fontWeight:700,color:"var(--g)",textTransform:"uppercase",letterSpacing:".06em",marginBottom:3}}>✓ Extraído automaticamente</p>
-                    <p style={{fontSize:13.5,fontWeight:600,lineHeight:1.3}}>{extracted.name}</p>
-                    {extracted.price&&<p style={{fontSize:13,fontWeight:800,color:"var(--g)",marginTop:3}}>{fmt(extracted.price)}</p>}
-                  </div>
-                </div>
-              ) : (
-                <div style={{background:"var(--goa)",border:"1px solid rgba(233,168,48,.3)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"var(--go)",display:"flex",gap:7}}>
-                  <AlertCircle size={14} style={{flexShrink:0,marginTop:1}}/>
-                  {extracted.warning || "Não consegui extrair os dados. Preencha o nome manualmente."}
-                </div>
-              )
-            )}
-            {!loading&&error&&<div style={{background:"var(--pa)",border:"1px solid rgba(18,114,170,.25)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"var(--p)",display:"flex",gap:7}}><AlertCircle size={14} style={{flexShrink:0,marginTop:1}}/>{error}</div>}
-            {!loading&&(
-              <>
-                <div><label className="lbl">Nome *</label><input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Nome do produto" autoFocus/></div>
-                <div><label className="lbl">Cômodo *</label><RoomPicker/></div>
-              </>
-            )}
-            <div style={{display:"flex",gap:8,justifyContent:"space-between",marginTop:4}}>
-              <button className="btn btn-g" onClick={()=>{setStep(1);setExtracted(null);setError("");}}><ArrowLeft size={13}/>Voltar</button>
-              <div style={{display:"flex",gap:8}}>
-                <button className="btn btn-s" onClick={onClose}><X size={13}/>Cancelar</button>
-                <button className="btn btn-p" onClick={handleSave} disabled={!name.trim()||!roomId||loading} style={(!name.trim()||loading)?{opacity:.5,cursor:"not-allowed"}:{}}><Check size={14}/>Salvar item</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
+// CompleteHomeModal → src/components/modals/CompleteHomeModal.jsx
 
-// ════════════════════════════════════════════════════════
-// ITEM FORM MODAL
-// ════════════════════════════════════════════════════════
-function ItemModal({item,rooms=[],onSave,onClose}) {
-  const [f,setF]=useState({name:item?.name||"",link:item?.link||"",price:item?.price||"",
-    imageUrl:item?.imageUrl||"",notes:item?.notes||"",status:item?.status||"want",
-    roomId:item?.roomId||(rooms[0]?.id||""),priority:item?.priority||"normal",starred:item?.starred||false});
-  const set=(k,v)=>setF(p=>({...p,[k]:v}));
-  const valid=f.name.trim()&&f.roomId;
-  return (
-    <div className="mbk" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{padding:"26px"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <h2 className="fd" style={{fontSize:21,fontWeight:600}}>{item?.id?"Editar item":"Novo item"}</h2>
-          <button className="btn btn-g bico" onClick={onClose}><X size={18}/></button>
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:13}}>
-          <div><label className="lbl">Nome *</label><input className="inp" value={f.name} onChange={e=>set("name",e.target.value)} placeholder="Nome do produto" autoFocus/></div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><label className="lbl">Cômodo *</label>
-              <select className="inp" value={f.roomId} onChange={e=>set("roomId",e.target.value)} style={{cursor:"pointer"}}>
-                {rooms.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}
-              </select>
-            </div>
-            <div><label className="lbl">Status</label>
-              <select className="inp" value={f.status} onChange={e=>set("status",e.target.value)} style={{cursor:"pointer"}}>
-                <option value="want">🛒 Quero comprar</option>
-                <option value="bought">✅ Comprado</option>
-              </select>
-            </div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div><label className="lbl">Preço (R$)</label><input className="inp" type="number" min="0" step="0.01" value={f.price} onChange={e=>set("price",e.target.value)} placeholder="0,00"/></div>
-            <div><label className="lbl">Prioridade</label>
-              <select className="inp" value={f.priority} onChange={e=>set("priority",e.target.value)} style={{cursor:"pointer"}}>
-                <option value="low">📌 Baixa</option>
-                <option value="normal">🔵 Normal</option>
-                <option value="high">⚡ Alta</option>
-              </select>
-            </div>
-          </div>
-          <div><label className="lbl">Link</label><input className="inp" value={f.link} onChange={e=>set("link",e.target.value)} placeholder="https://..."/></div>
-          <div><label className="lbl">URL da imagem</label><input className="inp" value={f.imageUrl} onChange={e=>set("imageUrl",e.target.value)} placeholder="https://..."/></div>
-          <div><label className="lbl">Observações</label><textarea className="inp" rows={3} value={f.notes} onChange={e=>set("notes",e.target.value)} placeholder="Cor, tamanho, modelo..." style={{resize:"vertical"}}/></div>
-          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:13,fontWeight:600,color:"var(--tx2)"}}>
-            <input type="checkbox" checked={f.starred} onChange={e=>set("starred",e.target.checked)} style={{width:16,height:16,accentColor:"var(--go)"}}/>⭐ Favorito
-          </label>
-        </div>
-        <div style={{display:"flex",gap:8,marginTop:20,justifyContent:"flex-end"}}>
-          <button className="btn btn-s" onClick={onClose}><X size={13}/>Cancelar</button>
-          <button className="btn btn-p" disabled={!valid} onClick={()=>{if(valid)onSave({...item,...f,name:f.name.trim()});}} style={!valid?{opacity:.5,cursor:"not-allowed"}:{}}><Check size={14}/>{item?.id?"Salvar":"Adicionar"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-// ════════════════════════════════════════════════════════
-// ROOM MODAL
-// ════════════════════════════════════════════════════════
 
-// ════════════════════════════════════════════════════════
-// COMPLETE HOME MODAL — IA sugere itens faltando
-// ════════════════════════════════════════════════════════
-function CompleteHomeModal({ rooms=[], items=[], onAddItems, onClose }) {
-  const [aptSize,     setAptSize]     = useState("2 quartos");
-  const [loading,     setLoading]     = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
-  const [selected,    setSelected]    = useState(new Set());
-  const [error,       setError]       = useState("");
-  const [step,        setStep]        = useState(1);
+// RoomModal → src/components/modals/RoomModal.jsx
 
-  const handleGenerate = async () => {
-    setLoading(true); setError("");
-    try {
-      const result = await AI.completeHome(rooms, items, aptSize);
-      const arr    = Array.isArray(result) ? result : (result?.items || []);
-      const valid  = arr.filter(i => rooms.some(r => r.id === i.roomId));
-      setSuggestions(valid);
-      setSelected(new Set(valid.map((_, i) => i)));
-      setStep(2);
-    } catch (e) {
-      setError("Erro ao gerar sugestões. Tente novamente. (" + e.message + ")");
-    } finally { setLoading(false); }
-  };
 
-  const toggle = (idx) => setSelected(s => {
-    const n = new Set(s);
-    n.has(idx) ? n.delete(idx) : n.add(idx);
-    return n;
-  });
 
-  const handleAdd = () => {
-    const toAdd = suggestions
-      .filter((_, i) => selected.has(i))
-      .map(s => ({
-        name:         s.name,
-        roomId:       s.roomId,
-        price:        s.estimatedPrice?.toString() || "",
-        priority:     s.priority || "normal",
-        status:       "want",
-        notes:        "",
-        starred:      false,
-        imageUrl:     "",
-        link:         "",
-        priceHistory: s.estimatedPrice
-          ? [{ price: s.estimatedPrice, date: new Date().toISOString().slice(0,10), source: "estimate" }]
-          : [],
-        priceOffers: [],
-      }));
-    onAddItems(toAdd);
-  };
+// ItemCard → src/components/items/ItemCard.jsx
 
-  const sizes = ["Studio", "1 quarto", "2 quartos", "3 quartos", "4+ quartos"];
 
-  return (
-    <div className="mbk" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal" style={{ padding:"26px" }}>
-        {/* Header */}
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
-          <div>
-            <h2 className="fd" style={{ fontSize:21, fontWeight:600 }}>Completar minha casa</h2>
-            <span className="aitag" style={{ marginTop:4, display:"inline-flex" }}>
-              <Sparkles size={9}/>Sugestões automáticas por cômodo
-            </span>
-          </div>
-          <button className="btn btn-g bico" onClick={onClose}><X size={18}/></button>
-        </div>
 
-        {/* Step 1: escolher tamanho */}
-        {step === 1 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:18 }}>
-            <div>
-              <label className="lbl">Tamanho do apartamento</label>
-              <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
-                {sizes.map(o => (
-                  <button key={o} onClick={() => setAptSize(o)} style={{
-                    padding:"8px 14px", borderRadius:9, cursor:"pointer",
-                    fontFamily:"var(--f)", fontSize:13, fontWeight:600,
-                    border:`1.5px solid ${aptSize===o?"var(--p)":"var(--bdr)"}`,
-                    background:aptSize===o?"var(--pa)":"transparent",
-                    color:aptSize===o?"var(--p)":"var(--tx3)", transition:"all .18s",
-                  }}>{o}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{ background:"var(--pa)", border:"1px solid rgba(18,114,170,.2)", borderRadius:10, padding:"12px 14px", fontSize:13, color:"var(--tx2)" }}>
-              <p style={{ fontWeight:700, marginBottom:4, color:"var(--p)" }}>Como funciona?</p>
-              <p style={{ lineHeight:1.55 }}>
-                Analisa os {items.length} itens já na sua lista e sugere o que está faltando
-                para um enxoval completo de {aptSize}.
-              </p>
-            </div>
-            {error && (
-              <div style={{ color:"var(--r)", fontSize:13, background:"var(--ra)", padding:"10px 12px", borderRadius:9 }}>
-                {error}
-              </div>
-            )}
-            <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
-              <button className="btn btn-s" onClick={onClose}><X size={13}/>Cancelar</button>
-              <button className="btn btn-p" onClick={handleGenerate} disabled={loading}>
-                {loading
-                  ? <><Loader2 size={14} style={{ animation:"spin 1s linear infinite" }}/>Gerando...</>
-                  : <><Sparkles size={14}/>Gerar sugestões</>}
-              </button>
-            </div>
-          </div>
-        )}
+// TrashView → src/components/items/TrashView.jsx
 
-        {/* Step 2: selecionar itens */}
-        {step === 2 && (
-          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <p style={{ fontSize:14, color:"var(--tx2)" }}>
-                <b style={{ color:"var(--tx)" }}>{selected.size}</b> de {suggestions.length} selecionados
-              </p>
-              <button className="btn btn-g" onClick={() =>
-                selected.size === suggestions.length
-                  ? setSelected(new Set())
-                  : setSelected(new Set(suggestions.map((_, i) => i)))
-              } style={{ fontSize:12 }}>
-                {selected.size === suggestions.length ? "Desmarcar todos" : "Marcar todos"}
-              </button>
-            </div>
-
-            <div style={{ display:"flex", flexDirection:"column", gap:7, maxHeight:360, overflowY:"auto" }}>
-              {suggestions.map((s, i) => {
-                const room = rooms.find(r => r.id === s.roomId);
-                const Icon = room ? getIcon(room.icon) : Home;
-                const on   = selected.has(i);
-                return (
-                  <div key={i} onClick={() => toggle(i)} style={{
-                    display:"flex", alignItems:"center", gap:10, padding:"10px 12px",
-                    borderRadius:9, cursor:"pointer",
-                    border:`1.5px solid ${on?"var(--p)":"var(--bdr)"}`,
-                    background:on?"var(--pa)":"transparent", transition:"all .18s",
-                  }}>
-                    <div style={{
-                      width:20, height:20, borderRadius:5, flexShrink:0, transition:"all .18s",
-                      border:`2px solid ${on?"var(--p)":"var(--bdr2)"}`,
-                      background:on?"var(--p)":"transparent",
-                      display:"flex", alignItems:"center", justifyContent:"center",
-                    }}>
-                      {on && <Check size={12} style={{ color:"white" }}/>}
-                    </div>
-                    <div style={{ flex:1 }}>
-                      <p style={{ fontWeight:600, fontSize:13.5 }}>{s.name}</p>
-                      <p style={{ fontSize:11, color:"var(--tx3)", display:"flex", alignItems:"center", gap:4, marginTop:1, flexWrap:"wrap" }}>
-                        <Icon size={9}/>{room?.name}
-                        {s.priority === "high"   && <span className="bdg bh" style={{ fontSize:9 }}><Flame size={7}/>Essencial</span>}
-                        {s.priority === "normal" && <span className="bdg bw" style={{ fontSize:9 }}>Normal</span>}
-                        {s.priority === "low"    && <span style={{ fontSize:9, background:"var(--bg3)", color:"var(--tx3)", padding:"1px 6px", borderRadius:99, fontWeight:700 }}>Opcional</span>}
-                      </p>
-                    </div>
-                    {s.estimatedPrice && (
-                      <span style={{ fontSize:12.5, fontWeight:700, color:"var(--tx2)", whiteSpace:"nowrap" }}>
-                        {fmt(s.estimatedPrice)}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{ display:"flex", gap:8, justifyContent:"space-between", paddingTop:6, borderTop:"1px solid var(--bdr)" }}>
-              <button className="btn btn-g" onClick={() => { setStep(1); setSuggestions([]); setError(""); }}>
-                <ArrowLeft size={13}/>Refazer
-              </button>
-              <button className="btn btn-p" onClick={handleAdd}
-                disabled={selected.size === 0}
-                style={selected.size === 0 ? { opacity:.5, cursor:"not-allowed" } : {}}>
-                <Plus size={14}/>Adicionar {selected.size} {selected.size === 1 ? "item" : "itens"}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function RoomModal({onSave,onClose}) {
-  const [name,setName]=useState("");const [icon,setIcon]=useState("home");const [color,setColor]=useState(PALETTE[0]);
-  return (
-    <div className="mbk" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="modal" style={{padding:"26px",maxWidth:380}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-          <h2 className="fd" style={{fontSize:20,fontWeight:600}}>Novo cômodo</h2>
-          <button className="btn btn-g bico" onClick={onClose}><X size={18}/></button>
-        </div>
-        <div style={{display:"flex",flexDirection:"column",gap:15}}>
-          <div><label className="lbl">Nome</label><input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="Varanda, Escritório..." autoFocus/></div>
-          <div><label className="lbl">Ícone</label>
-            <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-              {Object.entries(ICONS_MAP).map(([k,Icon])=>(
-                <button key={k} onClick={()=>setIcon(k)} style={{width:37,height:37,borderRadius:9,border:`2px solid ${icon===k?color:"var(--bdr)"}`,background:icon===k?`${color}20`:"transparent",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",color:icon===k?color:"var(--tx3)",transition:"all .18s"}}><Icon size={16}/></button>
-              ))}
-            </div>
-          </div>
-          <div><label className="lbl">Cor</label>
-            <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-              {PALETTE.map(c=><button key={c} onClick={()=>setColor(c)} style={{width:28,height:28,borderRadius:"50%",background:c,cursor:"pointer",border:`3px solid ${color===c?"var(--tx)":"transparent"}`,outline:"none",transition:"all .18s"}}/>)}
-            </div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8,marginTop:20,justifyContent:"flex-end"}}>
-          <button className="btn btn-s" onClick={onClose}><X size={13}/>Cancelar</button>
-          <button className="btn btn-p" disabled={!name.trim()} onClick={()=>{if(name.trim())onSave({name:name.trim(),icon,color});}} style={!name.trim()?{opacity:.5,cursor:"not-allowed"}:{}}><Plus size={14}/>Criar</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════
-// ITEM CARD
-// ════════════════════════════════════════════════════════
-function ItemCard({item,rooms=[],onToggle,onEdit,onDelete,onDuplicate,onStar,onUpdatePrice}) {
-  const room=rooms.find(r=>r.id===item?.roomId);
-  const RIcon=room?getIcon(room.icon):Home;
-  const store=getStore(item?.link);
-  const promoInfo=getPromoInfo(item);
-  const [buying,setBuying]=useState(false);
-  if(!item) return null;
-  const handleToggle=()=>{setBuying(true);onToggle(item);setTimeout(()=>setBuying(false),500);};
-  const cls=["ic",item.status==="bought"?"bought":"",item.priority==="high"&&item.status!=="bought"?"phi":"",item.starred&&item.status!=="bought"&&!promoInfo?"starred":"",promoInfo&&item.status!=="bought"?"promo":"",buying?"acp":""].filter(Boolean).join(" ");
-  return (
-    <div className={cls} style={{padding:"14px 15px"}}>
-      <div style={{display:"flex",gap:12}}>
-        <div style={{width:64,height:64,borderRadius:9,flexShrink:0,overflow:"hidden",background:"var(--bg3)",display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-          {item.imageUrl?<img src={item.imageUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/>:<Package size={22} style={{color:"var(--tx3)"}}/>}
-          {item.starred&&!promoInfo&&<div style={{position:"absolute",top:2,right:2,width:15,height:15,borderRadius:"50%",background:"var(--go)",display:"flex",alignItems:"center",justifyContent:"center"}}><Star size={8} style={{color:"white",fill:"white"}}/></div>}
-          {promoInfo&&item.status!=="bought"&&<div style={{position:"absolute",bottom:0,left:0,right:0,background:"var(--go)",color:"white",fontSize:8,fontWeight:800,textAlign:"center",padding:"2px 0"}}>🔥 {promoInfo.discount}% OFF</div>}
-        </div>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"flex-start",gap:6,marginBottom:4}}>
-            <span style={{fontWeight:700,fontSize:14,color:"var(--tx)",textDecoration:item.status==="bought"?"line-through":"none",lineHeight:1.3,flex:1}}>{item.name}</span>
-            {item.priority==="high"&&item.status!=="bought"&&<span className="bdg bh" style={{flexShrink:0}}><Flame size={8}/>Alta</span>}
-          </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:promoInfo&&item.status!=="bought"?5:7,alignItems:"center"}}>
-            {room&&<span style={{display:"flex",alignItems:"center",gap:3,fontSize:10.5,color:"var(--tx3)",background:"var(--bg3)",padding:"2px 7px",borderRadius:99}}><RIcon size={9}/>{room.name}</span>}
-            <span className={`bdg ${item.status==="bought"?"bd":"bw"}`}>{item.status==="bought"?"✓ Comprado":"Quero comprar"}</span>
-            {item.price&&<span style={{display:"flex",alignItems:"center",gap:5}}>{promoInfo&&<span style={{fontSize:11,color:"var(--tx3)",textDecoration:"line-through"}}>{fmt(promoInfo.originalPrice)}</span>}<span style={{fontSize:13,fontWeight:800,color:promoInfo?"var(--go)":"var(--p)"}}>{fmt(item.price)}</span></span>}
-            {store&&<StoreBadge url={item.link}/>}
-          </div>
-          {promoInfo&&item.status!=="bought"&&<div style={{marginBottom:6}}><PromoBadge promoInfo={promoInfo}/></div>}
-          {item.notes&&<p style={{fontSize:11.5,color:"var(--tx3)",lineHeight:1.4,marginBottom:6}}>{item.notes}</p>}
-          <div style={{display:"flex",gap:4,alignItems:"center"}}>
-            <button onClick={handleToggle} className="btn btn-g" style={{fontSize:11.5,fontWeight:700,padding:"4px 9px",borderRadius:7,gap:4,background:item.status==="bought"?"var(--ga)":"var(--pa)",color:item.status==="bought"?"var(--g)":"var(--p)"}}>
-              {item.status==="bought"?<Circle size={11}/>:<CheckCircle2 size={11}/>}{item.status==="bought"?"Desmarcar":"Comprado!"}
-            </button>
-            {item.link&&<a href={item.link} target="_blank" rel="noopener noreferrer" className="btn btn-g bico" style={{textDecoration:"none"}}><ExternalLink size={13}/></a>}
-            <button className="btn btn-g bico" onClick={()=>onEdit(item)}><Edit3 size={13}/></button>
-            <DeleteButton onConfirm={()=>onDelete(item.id)}/>
-            <button className={`btn btn-g bico bstr ${item.starred?"on":""}`} onClick={()=>onStar(item)}><Star size={13} style={item.starred?{fill:"var(--go)"}:{}}/></button>
-            <button className="btn btn-g bico" onClick={()=>onDuplicate(item)} title="Duplicar"><Copy size={13}/></button>
-          </div>
-          <PricePanel item={item} onUpdatePrice={onUpdatePrice}/>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════
-// TRASH VIEW
-// ════════════════════════════════════════════════════════
-function TrashView({items=[],rooms=[],onRestore,onPermanentDelete,onEmptyTrash}) {
-  const [confirmEmpty,setConfirmEmpty]=useState(false);
-  const [confirmId,setConfirmId]=useState(null);
-  const deleted=items.filter(isDeleted).sort((a,b)=>new Date(b.deletedAt)-new Date(a.deletedAt));
-  const fmtDate=(d)=>{try{return new Date(d).toLocaleDateString("pt-BR");}catch{return "—";}};
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12}}>
-        <div>
-          <h1 className="fd" style={{fontSize:27,fontWeight:600,display:"flex",alignItems:"center",gap:10}}><Trash size={22} style={{color:"var(--r)"}}/>Lixeira</h1>
-          <p style={{color:"var(--tx2)",fontSize:13,marginTop:3}}>{deleted.length} item{deleted.length!==1?"s":""} · removidos automaticamente após {TRASH_DAYS} dias</p>
-        </div>
-        {deleted.length>0&&<button className="btn btn-g" onClick={()=>setConfirmEmpty(true)} style={{color:"var(--r)",border:"1.5px solid var(--ra)",background:"var(--ra)",fontSize:12.5}}><Trash2 size={13}/>Esvaziar lixeira</button>}
-      </div>
-      <div style={{background:"var(--bg2)",border:"1px dashed var(--bdr2)",borderRadius:12,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,fontSize:13,color:"var(--tx3)"}}><Bell size={14} style={{flexShrink:0,color:"var(--go)"}}/>Itens excluídos não aparecem na lista nem nos cálculos. Auto-remoção em <b style={{color:"var(--tx)"}}>{TRASH_DAYS} dias</b>.</div>
-      {deleted.length===0&&<div className="empty" style={{paddingTop:80}}><div className="eico"><Trash size={30} style={{color:"var(--tx3)"}}/></div><p className="fd" style={{fontSize:20,fontWeight:600}}>Lixeira vazia</p><p style={{fontSize:13,color:"var(--tx3)"}}>Itens excluídos aparecerão aqui</p></div>}
-      {deleted.length>0&&(
-        <div style={{display:"flex",flexDirection:"column",gap:9}}>
-          {deleted.map(item=>{
-            const room=rooms.find(r=>r.id===item.roomId);const RIcon=room?getIcon(room.icon):Home;
-            const days=trashDaysLeft(item);const urgent=days!==null&&days<=3;
-            return (
-              <div key={item.id} className="trash-card">
-                <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-                  <div style={{width:54,height:54,borderRadius:9,flexShrink:0,overflow:"hidden",background:"var(--bg3)",display:"flex",alignItems:"center",justifyContent:"center",filter:"grayscale(60%)"}}>
-                    {item.imageUrl?<img src={item.imageUrl} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} onError={e=>{e.target.style.display="none";}}/>:<Package size={20} style={{color:"var(--tx3)"}}/>}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <p style={{fontWeight:700,fontSize:14,color:"var(--tx2)",textDecoration:"line-through",textDecorationColor:"var(--tx3)",marginBottom:4}}>{item.name}</p>
-                    <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:7,alignItems:"center"}}>
-                      {room&&<span style={{display:"flex",alignItems:"center",gap:3,fontSize:10.5,color:"var(--tx3)",background:"var(--bg3)",padding:"2px 7px",borderRadius:99}}><RIcon size={9}/>{room.name}</span>}
-                      {item.price&&<span style={{fontSize:12,fontWeight:700,color:"var(--tx3)"}}>{fmt(item.price)}</span>}
-                      <span style={{fontSize:10.5,color:"var(--tx3)"}}>Excluído em {fmtDate(item.deletedAt)}</span>
-                      {days!==null&&<span style={{fontSize:10.5,fontWeight:700,color:urgent?"var(--r)":"var(--tx3)",background:urgent?"var(--ra)":"var(--bg3)",padding:"1px 7px",borderRadius:99}}>{urgent&&"⚠️ "}Remove em {days}d</span>}
-                    </div>
-                    <div style={{display:"flex",gap:6}}>
-                      <button onClick={()=>onRestore(item.id)} className="btn" style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:8,background:"var(--ga)",color:"var(--g)",gap:5,border:"none",cursor:"pointer",display:"flex",alignItems:"center"}}><RotateCcw size={12}/>Restaurar</button>
-                      {confirmId===item.id?(
-                        <div style={{display:"flex",gap:5,alignItems:"center"}}>
-                          <span style={{fontSize:11.5,color:"var(--r)",fontWeight:600}}>Tem certeza?</span>
-                          <button onClick={()=>{onPermanentDelete(item.id);setConfirmId(null);}} className="btn" style={{fontSize:11.5,fontWeight:700,padding:"4px 10px",borderRadius:7,background:"var(--r)",color:"white",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><Trash2 size={11}/>Excluir</button>
-                          <button onClick={()=>setConfirmId(null)} className="btn btn-g" style={{fontSize:11.5,padding:"4px 8px",borderRadius:7,display:"flex",alignItems:"center",gap:4}}><X size={11}/>Cancelar</button>
-                        </div>
-                      ):(
-                        <button onClick={()=>setConfirmId(item.id)} className="btn" style={{fontSize:12,fontWeight:700,padding:"5px 12px",borderRadius:8,background:"var(--ra)",color:"var(--r)",gap:5,border:"none",cursor:"pointer",display:"flex",alignItems:"center"}}><Trash2 size={12}/>Excluir definitivo</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {confirmEmpty&&(
-        <div className="mbk" onClick={e=>e.target===e.currentTarget&&setConfirmEmpty(false)}>
-          <div className="modal" style={{padding:"26px",maxWidth:380}}>
-            <div style={{textAlign:"center",padding:"8px 0"}}>
-              <div style={{width:64,height:64,borderRadius:18,background:"var(--ra)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px"}}><Trash2 size={28} style={{color:"var(--r)"}}/></div>
-              <h3 style={{fontWeight:700,fontSize:17,marginBottom:8}}>Esvaziar lixeira?</h3>
-              <p style={{fontSize:13,color:"var(--tx2)",lineHeight:1.6,marginBottom:22}}>Todos os <b>{deleted.length} itens</b> serão removidos permanentemente.</p>
-              <div style={{display:"flex",gap:8,justifyContent:"center"}}>
-                <button className="btn btn-s" onClick={()=>setConfirmEmpty(false)}><X size={13}/>Cancelar</button>
-                <button className="btn" onClick={()=>{onEmptyTrash();setConfirmEmpty(false);}} style={{background:"var(--r)",color:"white",padding:"10px 20px",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:6,borderRadius:9,fontWeight:700,fontSize:13}}><Trash2 size={14}/>Esvaziar tudo</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ════════════════════════════════════════════════════════
 // MAIN APP — com Supabase
