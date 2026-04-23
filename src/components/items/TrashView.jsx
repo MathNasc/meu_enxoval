@@ -2,7 +2,7 @@
 import { Bell, Home, Package, RotateCcw, Trash, Trash2, X } from "lucide-react";
 import { fmt, isDeleted, trashDaysLeft, TRASH_DAYS } from "../../lib/utils/format";
 import { getIcon } from "../../lib/constants/index";
-import DeleteButton from "./ui/DeleteButton";
+import DeleteButton from "../ui/DeleteButton";
 
 function TrashView({items=[],rooms=[],onRestore,onPermanentDelete,onEmptyTrash}) {
   const [confirmEmpty,setConfirmEmpty]=useState(false);

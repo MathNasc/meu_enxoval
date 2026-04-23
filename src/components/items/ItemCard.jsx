@@ -2,10 +2,10 @@
 import { CheckCircle2, Circle, Copy, Edit3, ExternalLink, Flame, Home, Package, Star } from "lucide-react";
 import { fmt, getPromoInfo } from "../../lib/utils/format";
 import { getIcon, getStore } from "../../lib/constants/index";
-import DeleteButton from "./ui/DeleteButton";
-import PricePanel  from "./ui/PricePanel";
-import PromoBadge  from "./ui/PromoBadge";
-import StoreBadge  from "./ui/StoreBadge";
+import DeleteButton from "../ui/DeleteButton";
+import PricePanel  from "../ui/PricePanel";
+import PromoBadge  from "../ui/PromoBadge";
+import StoreBadge  from "../ui/StoreBadge";
 
 function ItemCard({item,rooms=[],onToggle,onEdit,onDelete,onDuplicate,onStar,onUpdatePrice}) {
   const room=rooms.find(r=>r.id===item?.roomId);
