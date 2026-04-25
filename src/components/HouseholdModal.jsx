@@ -1,5 +1,5 @@
-// src/components/HouseholdModal.jsx
 "use client";
+// src/components/HouseholdModal.jsx
 import { useState } from "react";
 import { X, Heart, Copy, Check, LogOut, Loader2, Link2 } from "lucide-react";
 

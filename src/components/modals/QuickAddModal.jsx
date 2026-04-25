@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { AlertCircle, ArrowLeft, ArrowRight, Check, Plus, Sparkles, X } from "lucide-react";
 import { fmt, todayStr } from "../../lib/utils/format";
 import { getIcon, getRoomSuggestions } from "../../lib/constants/index";

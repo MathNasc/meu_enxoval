@@ -1,5 +1,5 @@
-// src/components/AuthScreen.jsx
 "use client";
+// src/components/AuthScreen.jsx
 import { useState } from "react";
 import { Home, Mail, Lock, Eye, EyeOff, Loader2, Check } from "lucide-react";
 

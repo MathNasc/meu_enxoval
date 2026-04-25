@@ -7,6 +7,7 @@ import {
 import { fmt, daysLeft, getPromoInfo } from "../lib/utils/format";
 import { getIcon } from "../lib/constants/index";
 import InsightCard from "../components/ui/InsightCard";
+import RoomCharts from "../components/rooms/RoomCharts";
 
 // generateInsights re-used from Dashboard logic
 function generateInsights(activeItems, rooms, settings) {

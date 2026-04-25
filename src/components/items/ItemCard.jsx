@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { CheckCircle2, Circle, Copy, Edit3, ExternalLink, Flame, Home, Package, Star } from "lucide-react";
 import { fmt, getPromoInfo } from "../../lib/utils/format";
 import { getIcon, getStore } from "../../lib/constants/index";
