@@ -4,6 +4,7 @@ import { AlertCircle, ArrowLeft, ArrowRight, Check, Plus, Sparkles, X } from "lu
 import { fmt, todayStr } from "../../lib/utils/format";
 import { getIcon, getRoomSuggestions } from "../../lib/constants/index";
 import { AI } from "../../lib/services/api";
+import Sk from "../ui/Sk";
 
 function QuickAddModal({rooms=[],items=[],onSave,onClose}) {
   const [url,setUrl]=useState("");
