@@ -2,6 +2,7 @@
 import {
   BarChart3, Wallet, CalendarCheck, Home, Star, BadgePercent,
   Flame, TrendingDown, Lightbulb, CheckCircle2,
+  BarChart2,
 } from "lucide-react";
 import { fmt, daysLeft, getPromoInfo } from "../lib/utils/format";
 import { getIcon } from "../lib/constants/index";
@@ -208,7 +209,7 @@ function generateInsights(activeItems, rooms, settings) {
         )}
 
         {/* Insights */}
-        {(()=>{const ins=generateInsights();return ins.length>0&&(
+        {(()=>{const ins=generateInsights(activeItems, rooms, settings);return ins.length>0&&(
           <div style={{display:"flex",flexDirection:"column",gap:8}}>
             <h3 className="fd" style={{fontSize:18,fontWeight:600,display:"flex",alignItems:"center",gap:8}}><Lightbulb size={16} style={{color:"var(--go)"}}/>Insights</h3>
             {ins.map((x,i)=><InsightCard key={i} type={x.type} text={x.text} Icon={x.Icon} delay={i*.07}/>)}

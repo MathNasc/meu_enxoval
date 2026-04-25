@@ -4,6 +4,7 @@ import {
   Home, Plus, Clock, DollarSign, Package, ShoppingBag, CheckCircle2,
   Wallet, Lightbulb, Sparkles, Zap, Flame, BadgePercent, Award,
   TrendingDown, BarChart3, CalendarCheck, Target, Loader2,
+  BarChart2,
 } from "lucide-react";
 import { fmt, daysLeft, getPromoInfo } from "../lib/utils/format";
 import { getIcon } from "../lib/constants/index";
@@ -57,7 +58,7 @@ function generateInsights(activeItems, rooms, settings) {
     const pendVal  = allVal - spentVal;
     const budget   = parseFloat(settings.budgetTotal||0);
     const budgetPct= budget>0?Math.min(100,Math.round((allVal/budget)*100)):0;
-    const insights = generateInsights();
+    const insights = generateInsights(activeItems, rooms, settings);
 
     return (
       <div style={{display:"flex",flexDirection:"column",gap:22}}>
