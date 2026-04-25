@@ -53,14 +53,6 @@ function generateInsights(activeItems, rooms, settings) {
       .sort((a,b)=>parseFloat(b.price)-parseFloat(a.price))
       .slice(0,5);
 
-    // Rooms stats
-    const roomStats = rooms.map(r=>{
-      const ri=activeItems.filter(i=>i.roomId===r.id);
-      const rb=ri.filter(i=>i.status==="bought").length;
-      const rv=ri.filter(i=>i.price).reduce((s,i)=>s+parseFloat(i.price||0),0);
-      return {...r,total:ri.length,bought:rb,value:rv,pct:ri.length>0?Math.round((rb/ri.length)*100):0};
-    });
-
     const days = daysLeft(settings.deliveryDate);
 
     return (
