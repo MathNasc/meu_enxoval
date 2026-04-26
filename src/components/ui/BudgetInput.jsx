@@ -29,10 +29,11 @@ function BudgetInput({ value, onSave }) {
       value={local}
       onChange={handleChange}
       style={{
-        width: 180, padding: "6px 10px",
+        width: "100%", maxWidth: 180, minWidth: 100, padding: "6px 10px",
         background: "var(--bg)", border: "1.5px solid var(--bdr)",
         borderRadius: 8, fontFamily: "var(--f)", fontSize: 12.5,
         color: "var(--tx)", outline: "none", transition: "border-color .2s",
+        boxSizing: "border-box",
       }}
       onFocus={e => e.target.style.borderColor = "var(--p)"}
       onBlur={e  => e.target.style.borderColor = "var(--bdr)"}

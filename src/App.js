@@ -373,6 +373,11 @@ function AppInner() {
     showToast("Lixeira esvaziada","error");
   },[itemsHook,showToast]);
 
+  const handleDuplicate=useCallback(async (item)=>{
+    await itemsHook.duplicateItem(item);
+    showToast("Item duplicado!","success");
+  },[itemsHook,showToast]);
+
   const handleAddRoom=useCallback(async(data)=>{
     await roomsHook.addRoom(data);
     setRoomModal(false);
@@ -598,6 +603,7 @@ return (
                 setQuickModal={setQuickModal}
                 setItemModal={setItemModal}
                 handleDeleteItem={handleDeleteItem}
+                handleDuplicate={handleDuplicate}
                 itemsHook={itemsHook}
               />
             )}

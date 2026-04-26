@@ -138,9 +138,11 @@ function generateInsights(activeItems, rooms, settings) {
         <div className="card" style={{padding:"20px 22px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
             <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7}}><Wallet size={15} style={{color:"var(--p)"}}/>Controle financeiro</h3>
-            <div style={{display:"flex",alignItems:"center",gap:7}}>
-              <span style={{fontSize:12,color:"var(--tx3)"}}>Orçamento:</span>
-              <BudgetInput value={settings.budgetTotal} onSave={settingsHook.setBudgetTotal}/>
+            <div style={{display:"flex",alignItems:"center",gap:7,flex:"0 1 auto",minWidth:0}}>
+              <span style={{fontSize:12,color:"var(--tx3)",whiteSpace:"nowrap"}}>Orçamento:</span>
+              <div style={{minWidth:0,flex:"1 1 100px"}}>
+                <BudgetInput value={settings.budgetTotal} onSave={settingsHook.setBudgetTotal}/>
+              </div>
             </div>
           </div>
           {/* Financial cards */}

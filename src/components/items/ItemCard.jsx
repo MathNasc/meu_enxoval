@@ -15,7 +15,7 @@ function ItemCard({item,rooms=[],onToggle,onEdit,onDelete,onDuplicate,onStar,onU
   const promoInfo=getPromoInfo(item);
   const [buying,setBuying]=useState(false);
   if(!item) return null;
-  const handleToggle=()=>{setBuying(true);onToggle(item);setTimeout(()=>setBuying(false),500);};
+  const handleToggle=()=>{setBuying(true);onToggle(item.id);setTimeout(()=>setBuying(false),500);};
   const cls=["ic",item.status==="bought"?"bought":"",item.priority==="high"&&item.status!=="bought"?"phi":"",item.starred&&item.status!=="bought"&&!promoInfo?"starred":"",promoInfo&&item.status!=="bought"?"promo":"",buying?"acp":""].filter(Boolean).join(" ");
   return (
     <div className={cls} style={{padding:"14px 15px"}}>
@@ -45,7 +45,7 @@ function ItemCard({item,rooms=[],onToggle,onEdit,onDelete,onDuplicate,onStar,onU
             {item.link&&<a href={item.link} target="_blank" rel="noopener noreferrer" className="btn btn-g bico" style={{textDecoration:"none"}}><ExternalLink size={13}/></a>}
             <button className="btn btn-g bico" onClick={()=>onEdit(item)}><Edit3 size={13}/></button>
             <DeleteButton onConfirm={()=>onDelete(item.id)}/>
-            <button className={`btn btn-g bico bstr ${item.starred?"on":""}`} onClick={()=>onStar(item)}><Star size={13} style={item.starred?{fill:"var(--go)"}:{}}/></button>
+            <button className={`btn btn-g bico bstr ${item.starred?"on":""}`} onClick={()=>onStar(item.id)}><Star size={13} style={item.starred?{fill:"var(--go)"}:{}}/></button>
             <button className="btn btn-g bico" onClick={()=>onDuplicate(item)} title="Duplicar"><Copy size={13}/></button>
           </div>
           <PricePanel item={item} onUpdatePrice={onUpdatePrice}/>

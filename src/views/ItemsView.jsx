@@ -7,7 +7,7 @@ import {
 import { getRoomSuggestions } from "../lib/constants/index";
 import ItemCard from "../components/items/ItemCard";
 
-export default function ItemsView({ activeItems, filtered, rooms, itemsLoading, filters, dispatchFilter, hasFilters, openAdd, setQuickModal, setItemModal, handleDeleteItem, itemsHook }) {
+export default function ItemsView({ activeItems, filtered, rooms, itemsLoading, filters, dispatchFilter, hasFilters, openAdd, setQuickModal, setItemModal, handleDeleteItem, handleDuplicate, itemsHook }) {
   // Destructure filter state from the filters prop object
   const { search, fRoom, fStatus, fPrio, fStar, fPromo,
           minPrice, maxPrice, sort, vw, filtersOpen } = filters;
@@ -309,7 +309,7 @@ export default function ItemsView({ activeItems, filtered, rooms, itemsLoading, 
               onToggle={itemsHook.toggleStatus}
               onEdit={setItemModal}
               onDelete={handleDeleteItem}
-              onDuplicate={itemsHook.duplicateItem}
+              onDuplicate={handleDuplicate}
               onStar={itemsHook.toggleStar}
               onUpdatePrice={itemsHook.updatePriceOffers}/>
           ))}
