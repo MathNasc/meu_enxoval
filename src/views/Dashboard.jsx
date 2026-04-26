@@ -136,26 +136,34 @@ function generateInsights(activeItems, rooms, settings) {
 
         {/* Financial control — RESTORED */}
         <div className="card" style={{padding:"20px 22px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
-            <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7}}><Wallet size={15} style={{color:"var(--p)"}}/>Controle financeiro</h3>
-            <div style={{display:"flex",alignItems:"center",gap:7,flex:"0 1 auto",minWidth:0}}>
-              <span style={{fontSize:12,color:"var(--tx3)",whiteSpace:"nowrap"}}>Orçamento:</span>
-              <div style={{minWidth:0,flex:"1 1 100px"}}>
+          <div style={{marginBottom:14}}>
+            <h3 style={{fontWeight:700,fontSize:15,display:"flex",alignItems:"center",gap:7,marginBottom:10}}>
+              <Wallet size={15} style={{color:"var(--p)"}}/>Controle financeiro
+            </h3>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:12,color:"var(--tx3)",whiteSpace:"nowrap",flexShrink:0}}>Orçamento:</span>
+              <div style={{flex:1,minWidth:0}}>
                 <BudgetInput value={settings.budgetTotal} onSave={settingsHook.setBudgetTotal}/>
               </div>
             </div>
           </div>
           {/* Financial cards */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:budget>0?14:0}}>
+          {/* Financial cards — flex wrap so they stack on narrow screens */}
+          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:budget>0?14:0}}>
             {[
-              {l:"Já gasto",   v:fmt(spentVal),c:"var(--g)",  bg:"var(--ga)", Icon:CheckCircle2},
-              {l:"Pendente",   v:fmt(pendVal), c:"var(--go)", bg:"var(--goa)",Icon:ShoppingBag},
-              {l:"Orçamento",  v:budget>0?fmt(budget):"—", c:"var(--p)",  bg:"var(--pa)", Icon:Target},
+              {l:"Já gasto",  v:fmt(spentVal),c:"var(--g)",  bg:"var(--ga)", Icon:CheckCircle2},
+              {l:"Pendente",  v:fmt(pendVal), c:"var(--go)", bg:"var(--goa)",Icon:ShoppingBag},
+              {l:"Orçamento", v:budget>0?fmt(budget):"—",c:"var(--p)",bg:"var(--pa)",Icon:Target},
             ].map((s,i)=>(
-              <div key={i} style={{background:s.bg,borderRadius:10,padding:"11px 13px",textAlign:"center"}}>
-                <div style={{display:"flex",justifyContent:"center",marginBottom:5}}><s.Icon size={13} style={{color:s.c}}/></div>
+              <div key={i} style={{
+                background:s.bg, borderRadius:10, padding:"11px 13px", textAlign:"center",
+                flex:"1 1 90px", minWidth:90, maxWidth:"100%",
+              }}>
+                <div style={{display:"flex",justifyContent:"center",marginBottom:5}}>
+                  <s.Icon size={13} style={{color:s.c}}/>
+                </div>
                 <p style={{fontSize:9.5,fontWeight:700,color:s.c,textTransform:"uppercase",letterSpacing:".06em",marginBottom:4,opacity:.8}}>{s.l}</p>
-                <p style={{fontSize:13.5,fontWeight:800,color:s.c}}>{s.v}</p>
+                <p style={{fontSize:13.5,fontWeight:800,color:s.c,wordBreak:"break-word"}}>{s.v}</p>
               </div>
             ))}
           </div>

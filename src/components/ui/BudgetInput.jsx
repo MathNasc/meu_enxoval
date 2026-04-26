@@ -29,7 +29,7 @@ function BudgetInput({ value, onSave }) {
       value={local}
       onChange={handleChange}
       style={{
-        width: "100%", maxWidth: 180, minWidth: 100, padding: "6px 10px",
+        display: "block", width: "100%", padding: "6px 10px",
         background: "var(--bg)", border: "1.5px solid var(--bdr)",
         borderRadius: 8, fontFamily: "var(--f)", fontSize: 12.5,
         color: "var(--tx)", outline: "none", transition: "border-color .2s",
