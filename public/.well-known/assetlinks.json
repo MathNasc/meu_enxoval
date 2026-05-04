@@ -3,6 +3,6 @@
       "target": {
         "namespace": "android_app",
         "package_name": "app.vercel.meu_enxoval.twa",
-        "sha256_cert_fingerprints": ["88:60:B4:AC:79:E6:27:7B:9B:8A:77:2A:8E:08:66:56:31:89:60:A2:FF:E5:BC:77:6C:11:7A:E9:19:8F:49:AA"]
+        "sha256_cert_fingerprints": ["A6:11:61:EA:1B:0D:05:0C:18:76:7B:5D:96:F9:31:6B:B4:DD:DB:BD:34:9A:A7:F4:4D:93:DF:E3:F9:B7:A6:3D"]
       }
     }]
