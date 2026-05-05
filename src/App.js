@@ -455,13 +455,34 @@ return (
       <main style={{flex:1,minWidth:0,display:"flex",flexDirection:"column"}}>
         <div className="topbar">
           <button className="btn btn-g bico" onClick={()=>setSidebar(s=>!s)} style={{background:"var(--bg3)",flexShrink:0}}><Layers size={16}/></button>
-          <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0,overflow:"hidden"}}>
             {(()=>{const n=navItems.find(x=>x.id===view);const Icon=n?.icon;return Icon?<Icon size={16} style={{color:"var(--p)",flexShrink:0}}/>:null;})()}
-            <span className="fd" style={{fontWeight:600,fontSize:16,fontStyle:"italic",whiteSpace:"nowrap"}}>{navItems.find(n=>n.id===view)?.label}</span>
-            {pending>0&&view==="dashboard"&&<span style={{background:"var(--p)",color:"white",fontSize:10.5,fontWeight:700,padding:"2px 8px",borderRadius:99,flexShrink:0}}>{pending} pendentes</span>}
+            <span className="fd" style={{fontWeight:600,fontSize:16,fontStyle:"italic",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{navItems.find(n=>n.id===view)?.label}</span>
           </div>
           <div style={{display:"flex",gap:6,flexShrink:0}}>
-            {view!=="trash"&&view!=="summary"&&<><button className="btn btn-s" style={{padding:"7px 11px",fontSize:12.5}} onClick={()=>setQuickModal(true)}><Zap size={13}/>Rápido</button><button className="btn btn-p" style={{padding:"7px 13px",fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Item</button></>}
+            {view!=="trash"&&view!=="summary"&&<>
+              {/* Botão Rápido com badge de pendentes */}
+              <div style={{position:"relative"}}>
+                <button className="btn btn-s" style={{padding:"7px 11px",fontSize:12.5}} onClick={()=>setQuickModal(true)}>
+                  <Zap size={13}/>Rápido
+                </button>
+                {pending>0&&view==="dashboard"&&(
+                  <span style={{
+                    position:"absolute",top:-7,right:-7,
+                    minWidth:18,height:18,borderRadius:99,
+                    background:"var(--r)",color:"white",
+                    fontSize:10,fontWeight:800,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    padding:"0 4px",lineHeight:1,
+                    boxShadow:"0 1px 4px rgba(0,0,0,.35)",
+                    pointerEvents:"none",
+                  }}>
+                    {pending > 99 ? "99+" : pending}
+                  </span>
+                )}
+              </div>
+              <button className="btn btn-p" style={{padding:"7px 13px",fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Item</button>
+            </>}
           </div>
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"24px 20px"}}>
