@@ -78,6 +78,16 @@ export function useAuth() {
     setProfile(null);
   }, []);
 
+  // ── Reset password — envia e-mail com link ───────────
+  const resetPassword = useCallback(async (email) => {
+    setError("");
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (err) { setError(err.message); return false; }
+    return true;
+  }, []);
+
   // ── Retorna o invite_code do household ──────────────────
   const getInviteCode = useCallback(() => {
     // profile.households é o objeto relacionado (join do SELECT)
@@ -159,6 +169,7 @@ export function useAuth() {
     signUp,
     signIn,
     signOut,
+    resetPassword,
     getInviteCode,
     joinHousehold,
     leaveHousehold,

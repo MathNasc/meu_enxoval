@@ -390,6 +390,7 @@ function AppInner() {
   // Mostra tela de login se não autenticado
   if(!auth.user) return (
     <AuthScreen onSignIn={auth.signIn} onSignUp={auth.signUp}
+      onResetPassword={auth.resetPassword}
       loading={auth.loading} error={auth.error} setError={auth.setError}/>
   );
 
