@@ -1,4 +1,4 @@
-import { detectProduct } from "@/lib/product-detection/index.js";
+import { detectProduct } from "../../../lib/product-detection/index.js";
 
 export async function POST(req) {
   let url;
