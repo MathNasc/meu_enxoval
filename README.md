@@ -454,28 +454,6 @@ npm run start    # Servidor de produção local
 
 ---
 
-## 🗺 Roadmap
-
-### Em desenvolvimento
-- [ ] Notificações push (infra de SW já implementada)
-- [ ] Histórico visual de preços por item (sparkline)
-
-### Planejado
-- [ ] **Metas financeiras** — dividir orçamento por cômodo
-- [ ] **Listas compartilhadas** — convidar amigos para listas temáticas (chá de casa nova)
-- [ ] **Scanner de código de barras** — identificar produto pela câmera
-- [ ] **Alerta de preço** — notificar quando produto atingir preço-alvo
-- [ ] **Exportar PDF** — lista formatada para impressão
-- [ ] **Múltiplas listas** — viagem, bebê, reforma, etc.
-- [ ] **Histórico de compras** — relatório mensal de gastos
-
-### Ideias futuras
-- [ ] Integração com Pix para registro de pagamentos
-- [ ] IA para sugestão de onde comprar com base no histórico
-- [ ] App nativo React Native com câmera e notificações nativas
-
----
-
 ## 🛠 Stack Técnica
 
 ### Frontend
