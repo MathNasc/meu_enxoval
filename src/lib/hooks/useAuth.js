@@ -24,6 +24,27 @@ export function useAuth() {
   // ── Inicializa sessão (com tratamento de token inválido) ─
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session }, error }) => {
+      // ─── NOVO: Intercepta tokens de recovery ─────────────────────────────
+      // Se o usuário clicou em um link de recovery e aterrizou em qualquer
+      // rota que não seja /reset-password, redireciona para lá.
+      if (typeof window !== "undefined" && session) {
+        const hash   = window.location.hash;
+        const params = new URLSearchParams(hash.substring(1));
+
+        const isRecoveryUrl =
+          params.get("type") === "recovery" ||
+          // PKCE: o code já foi trocado, mas ainda podemos detectar pela rota atual
+          (window.location.pathname !== "/reset-password" &&
+           new URLSearchParams(window.location.search).has("code"));
+
+        if (isRecoveryUrl && window.location.pathname !== "/reset-password") {
+          // Redireciona preservando o hash com o token
+          window.location.replace("/reset-password" + hash);
+          return; // Para o processamento normal da sessão
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       // Token inválido no Vercel — limpa e deixa o usuário logar de novo
       if (error?.message?.includes("Refresh Token")) {
         console.warn("[useAuth] Stale token detected, clearing session");
@@ -31,6 +52,7 @@ export function useAuth() {
         setLoading(false);
         return;
       }
+
       setUser(session?.user ?? null);
       if (session?.user) {
         loadProfile(session.user.id).finally(() => setLoading(false));
