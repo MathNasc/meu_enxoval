@@ -61,10 +61,6 @@ import RoomsView  from "./views/RoomsView";
 import SummaryView from "./views/SummaryView";
 
 // ════════════════════════════════════════════════════════
-// STYLES (idêntico ao v4 — mantido para brevidade)
-// ════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════
 // ERROR BOUNDARY — catches render crashes and shows a
 // friendly message instead of a blank screen
 // ════════════════════════════════════════════════════════
@@ -131,71 +127,21 @@ class ErrorBoundary extends Component {
   }
 }
 
-// Styles → src/styles/globals.css (importado em app/layout.js)
-
-// Constants, utils e ICONS_MAP → ver src/lib/constants/index.js e src/lib/utils/format.js
-
-// AI → src/lib/services/api.js
-
 // ════════════════════════════════════════════════════════
-// PRIMITIVES (Sk, StoreBadge, DeleteButton, Toast, etc.)
+// PRIMITIVES
 // ════════════════════════════════════════════════════════
 const Sk = ({w="100%",h=14,r=8}) => (
   <span className="shimmer" style={{width:w,height:h,borderRadius:r,display:"block"}}/>
 );
 
-// StoreBadge → src/components/ui/StoreBadge.jsx
-
-// PromoBadge → src/components/ui/PromoBadge.jsx
-
-
-// DeleteButton → src/components/ui/DeleteButton.jsx
-
-// Toast → src/components/ui/Toast.jsx
-
-
-
-
-// PricePanel → src/components/ui/PricePanel.jsx
-
-
-
-// QuickAddModal → src/components/modals/QuickAddModal.jsx
-
-
-
-// ItemModal → src/components/modals/ItemModal.jsx
-
-
-// CompleteHomeModal → src/components/modals/CompleteHomeModal.jsx
-
-
-
-// RoomModal → src/components/modals/RoomModal.jsx
-
-
-
-// ItemCard → src/components/items/ItemCard.jsx
-
-
-
-// TrashView → src/components/items/TrashView.jsx
-
-
 // ════════════════════════════════════════════════════════
-// MAIN APP — com Supabase
+// MAIN APP
 // ════════════════════════════════════════════════════════
-
-// ════════════════════════════════════════════════════════
-// FILTER REDUCER — estado único para todos os filtros de Meus Itens
-// Elevado ao App para sobreviver a re-renders e troca de abas.
-// ════════════════════════════════════════════════════════
-// filterReducer + FILTER_INITIAL → ver src/lib/hooks/useFilters.js
 
 function AppInner() {
-  const auth     = useAuth();
-  const itemsHook= useItems(auth.householdId);
-  const roomsHook= useRooms(auth.householdId);
+  const auth         = useAuth();
+  const itemsHook    = useItems(auth.householdId);
+  const roomsHook    = useRooms(auth.householdId);
   const settingsHook = useSettings(auth.householdId);
 
   const [dk,      setDk]      = useState(false);
@@ -205,11 +151,11 @@ function AppInner() {
   const [toasts,  setToasts]  = useState([]);
 
   // Modals
-  const [quickModal,    setQuickModal]    = useState(false);
-  const [itemModal,     setItemModal]     = useState(null);
-  const [roomModal,     setRoomModal]     = useState(false);
-  const [householdModal,setHouseholdModal]= useState(false);
-  const [homeModal,     setHomeModal]     = useState(false);
+  const [quickModal,     setQuickModal]     = useState(false);
+  const [itemModal,      setItemModal]      = useState(null);
+  const [roomModal,      setRoomModal]      = useState(false);
+  const [householdModal, setHouseholdModal] = useState(false);
+  const [homeModal,      setHomeModal]      = useState(false);
 
   // Dark mode persistence
   useEffect(()=>{
@@ -300,30 +246,23 @@ function AppInner() {
     const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,\uFEFF"+encodeURIComponent(csv);a.download="enxoval.csv";a.click();
   },[]);
 
-
-  // ── Summary View ─────────────────────────────────────
-  // generateInsights — analisa items e gera alertas úteis
-  // ─────────────────────────────────────────────────────
-  // generateInsights → src/views/Dashboard.jsx and SummaryView.jsx
-// SummaryView → src/views/SummaryView.jsx
-// ── Derived from hooks (must be before useMemo deps and early returns) ──
-  const {items,loading:itemsLoading}=itemsHook;
-  const {rooms}=roomsHook;
-  const {settings,saveSettings}=settingsHook;
+  // ── Derived from hooks ────────────────────────────────────
+  const {items,loading:itemsLoading} = itemsHook;
+  const {rooms}                      = roomsHook;
+  const {settings}                   = settingsHook;
   const activeItems  = items.filter(isActive);
   const deletedItems = items.filter(isDeleted);
 
+  // ── Nav items
   const navItems=[
-    {id:"dashboard",label:"Dashboard",  icon:LayoutDashboard,count:null},
-    {id:"items",    label:"Meus Itens", icon:ShoppingBag,    count:activeItems.length},
-    {id:"rooms",    label:"Cômodos",    icon:Home,           count:rooms.length},
-    {id:"summary",  label:"Resumo",     icon:FileText,       count:null},
-    {id:"trash",    label:"Lixeira",    icon:Trash,          count:deletedItems.length,danger:true},
+    {id:"dashboard", label:"Dashboard",  icon:LayoutDashboard, count:null},
+    {id:"items",     label:"Meus Itens", icon:ShoppingBag,     count:activeItems.length},
+    {id:"rooms",     label:"Cômodos",    icon:Home,            count:rooms.length},
+    {id:"summary",   label:"Resumo",     icon:FileText,        count:null},
+    {id:"trash",     label:"Lixeira",    icon:Trash,           count:deletedItems.length, danger:true},
   ];
-  const pending      = activeItems.filter(i=>i.status!=="bought").length;
 
-  // ── Pre-computed derived state (must be before early returns — Rules of Hooks) ──
-  // Desestrutura o estado elevado de filtros
+  // ── Filtros ───────────────────────────────────────────────
   const { search, fRoom, fStatus, fPrio, fStar, fPromo, minPrice, maxPrice, sort, vw, filtersOpen } = filters;
 
   const filtered = useMemo(()=>{
@@ -355,8 +294,7 @@ function AppInner() {
 
   const hasFilters = fRoom!=="all"||fStatus!=="all"||fPrio!=="all"||fStar||fPromo||!!search.trim()||minPrice!==""||maxPrice!=="";
 
-
-  // ── Dados agregados por cômodo (derivados de activeItems — sem query extra) ──
+  // ── Dados agregados por cômodo ────────────────────────────
   const roomStats = useMemo(() => (rooms || []).map(r => {
     const ri       = (activeItems || []).filter(i => i?.roomId === r.id);
     const bought   = ri.filter(i => i.status === "bought");
@@ -387,48 +325,46 @@ function AppInner() {
     </div>
   );
 
-  // Mostra tela de login se não autenticado
   if(!auth.user) return (
     <AuthScreen onSignIn={auth.signIn} onSignUp={auth.signUp}
       onResetPassword={auth.resetPassword}
       loading={auth.loading} error={auth.error} setError={auth.setError}/>
   );
 
-
-
-  // ── Conteúdo simplificado (Dashboard e Items)  ────────────
-
-// ════════════════════════════════════════════════════════
-// ROOM CHARTS — gráficos por cômodo
-// Reutiliza dados já carregados (activeItems + rooms).
-// Nenhuma query extra ao Supabase necessária.
-// ════════════════════════════════════════════════════════
-// RoomCharts → src/components/rooms/RoomCharts.jsx
-
-
-  // ─────────────────────────────────────────────────────
-  // DashboardSimple → src/views/Dashboard.jsx
-// ItemsSimple → src/views/ItemsView.jsx
-// RoomsSimple → src/views/RoomsView.jsx
-return (
+  // ── Render ────────────────────────────────────────────────
+  return (
     <div className={dk?"dk":""} style={{display:"flex",minHeight:"100vh",background:"var(--bg)"}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes fabIn{from{opacity:0;transform:scale(.5) translateY(20px)}to{opacity:1;transform:scale(1) translateY(0)}}`}</style>
 
       {sidebar&&<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:90}} onClick={()=>setSidebar(false)}/>}
 
-      {/* Sidebar */}
+      {/* ── Sidebar ── */}
       <aside className={`sidebar ${sidebar?"open":""}`} style={{width:228,background:"var(--bg2)",borderRight:"1px solid var(--bdr)",padding:"18px 13px",display:"flex",flexDirection:"column",gap:3,zIndex:100}}>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:24,paddingLeft:4}}>
           <div style={{width:36,height:36,borderRadius:11,background:"linear-gradient(135deg,#1272AA,#1E90CC)",display:"flex",alignItems:"center",justifyContent:"center"}}><Home size={18} style={{color:"white"}}/></div>
           <span className="fd" style={{fontSize:17,fontWeight:600,fontStyle:"italic",color:"var(--tx)"}}>Enxoval</span>
         </div>
-        {navItems.map(n=>{const Icon=n.icon;const isOn=view===n.id;const isDanger=n.danger&&!isOn;return(
-          <button key={n.id} className={`nb ${isOn?"on":""}`} onClick={()=>{setView(n.id);setSidebar(false);}} style={isDanger?{color:"var(--r)"}:{}}>
-            <Icon size={15}/>{n.label}
-            {n.count!=null&&n.count>0&&<span className="nc" style={isDanger?{background:"var(--ra)",color:"var(--r)"}:{}}>{n.count}</span>}
-          </button>
-        );})}
+
+        {navItems.map(n=>{
+          const Icon     = n.icon;
+          const isOn     = view === n.id;
+          const isDanger = n.danger && !isOn;
+          return(
+            <button key={n.id} className={`nb ${isOn?"on":""}`}
+              onClick={()=>{setView(n.id);setSidebar(false);}}
+              style={isDanger?{color:"var(--r)"}:{}}>
+              <Icon size={15}/>{n.label}
+              {n.count!=null&&n.count>0&&(
+                <span className="nc" style={isDanger?{background:"var(--ra)",color:"var(--r)"}:{}}>
+                  {n.count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+
         <div style={{flex:1}}/>
+
         {/* User info */}
         <div style={{background:"var(--bg3)",borderRadius:11,padding:"12px",marginBottom:10}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -452,7 +388,7 @@ return (
         </div>
       </aside>
 
-      {/* Main */}
+      {/* ── Main ── */}
       <main style={{flex:1,minWidth:0,display:"flex",flexDirection:"column"}}>
         <div className="topbar">
           <button className="btn btn-g bico" onClick={()=>setSidebar(s=>!s)} style={{background:"var(--bg3)",flexShrink:0}}><Layers size={16}/></button>
@@ -460,32 +396,24 @@ return (
             {(()=>{const n=navItems.find(x=>x.id===view);const Icon=n?.icon;return Icon?<Icon size={16} style={{color:"var(--p)",flexShrink:0}}/>:null;})()}
             <span className="fd" style={{fontWeight:600,fontSize:16,fontStyle:"italic",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{navItems.find(n=>n.id===view)?.label}</span>
           </div>
+
+          {/*
+            ALTERAÇÃO: botão "Rápido" sem wrapper <div> de posicionamento
+            e sem o <span> de badge. O contador de pendências foi movido
+            para o menu lateral em "Meus Itens".
+          */}
           <div style={{display:"flex",gap:6,flexShrink:0}}>
             {view!=="trash"&&view!=="summary"&&<>
-              {/* Botão Rápido com badge de pendentes */}
-              <div style={{position:"relative"}}>
-                <button className="btn btn-s" style={{padding:"7px 11px",fontSize:12.5}} onClick={()=>setQuickModal(true)}>
-                  <Zap size={13}/>Rápido
-                </button>
-                {pending>0&&view==="dashboard"&&(
-                  <span style={{
-                    position:"absolute",top:-7,right:-7,
-                    minWidth:18,height:18,borderRadius:99,
-                    background:"var(--r)",color:"white",
-                    fontSize:10,fontWeight:800,
-                    display:"flex",alignItems:"center",justifyContent:"center",
-                    padding:"0 4px",lineHeight:1,
-                    boxShadow:"0 1px 4px rgba(0,0,0,.35)",
-                    pointerEvents:"none",
-                  }}>
-                    {pending > 99 ? "99+" : pending}
-                  </span>
-                )}
-              </div>
-              <button className="btn btn-p" style={{padding:"7px 13px",fontSize:12.5}} onClick={()=>openAdd()}><Plus size={13}/>Item</button>
+              <button className="btn btn-s" style={{padding:"7px 11px",fontSize:12.5}} onClick={()=>setQuickModal(true)}>
+                <Zap size={13}/>Rápido
+              </button>
+              <button className="btn btn-p" style={{padding:"7px 13px",fontSize:12.5}} onClick={()=>openAdd()}>
+                <Plus size={13}/>Item
+              </button>
             </>}
           </div>
         </div>
+
         <div style={{flex:1,overflowY:"auto",padding:"24px 20px"}}>
           <div style={{maxWidth:900,margin:"0 auto"}}>
             {view==="dashboard" && (
@@ -564,8 +492,6 @@ return (
   );
 }
 
-// Wrap with ErrorBoundary so crashes show a friendly message
-// instead of a blank Vercel page
 export default function App() {
   return (
     <ErrorBoundary>
