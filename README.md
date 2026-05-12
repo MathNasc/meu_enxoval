@@ -33,8 +33,6 @@ O app permite que dois usuários compartilhem a mesma lista em tempo real, organ
 |---------------------|------------------|
 | ![Preços](./docs/screenshots/prices.png) | ![Financeiro](./docs/screenshots/summary.png) |
 
-> 📁 Adicione as screenshots em `docs/screenshots/` para exibir aqui.
-
 ---
 
 ## ✨ Funcionalidades
