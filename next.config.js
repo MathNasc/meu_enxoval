@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: "standalone",
   // Permite servir arquivos de .well-known/ (necessário para Digital Asset Links)
   // e garante headers corretos para o manifest e SW
   async headers() {

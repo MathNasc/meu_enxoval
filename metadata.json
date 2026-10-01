@@ -1,0 +1,7 @@
+{
+  "name": "Meu Enxoval",
+  "description": "Organize o enxoval do seu apartamento — lista inteligente para casais",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
